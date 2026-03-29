@@ -1,6 +1,7 @@
 using AspNetCoreRateLimit;
 using BankingAPI.Api.Extensions;
 using BankingAPI.Api.Filters;
+using BankingAPI.Application.DTOs.Errors;
 using BankingAPI.Application.Interfaces;
 using BankingAPI.Application.Services;
 using BankingAPI.Infrastructure.Data;
@@ -12,6 +13,7 @@ using Microsoft.OpenApi.Models;
 using Serilog;
 using Serilog.Events;
 using Serilog.Formatting.Json;
+using System.Threading.RateLimiting;
 
 internal class Program
 {
@@ -87,18 +89,48 @@ internal class Program
 
             c.AddSecurityRequirement(new OpenApiSecurityRequirement
             {
-        {
-            new OpenApiSecurityScheme
-            {
-                Reference = new OpenApiReference
                 {
-                    Type = ReferenceType.SecurityScheme,
-                    Id = "Bearer"
+                    new OpenApiSecurityScheme
+                    {
+                        Reference = new OpenApiReference
+                        {
+                            Type = ReferenceType.SecurityScheme,
+                            Id = "Bearer"
+                        }
+                    },
+                    Array.Empty<string>()
                 }
-            },
-            Array.Empty<string>()
-        }
             });
+        });
+
+        builder.Services.AddRateLimiter(options =>
+        {
+            options.AddPolicy("TransferPolicy", context =>
+                RateLimitPartition.GetFixedWindowLimiter(
+                    partitionKey: context.User.Identity?.Name ?? context.Connection.RemoteIpAddress?.ToString(),
+                    factory: _ => new FixedWindowRateLimiterOptions
+                    {
+                        PermitLimit = 5,
+                        Window = TimeSpan.FromMinutes(1),
+                        QueueProcessingOrder = QueueProcessingOrder.OldestFirst,
+                        QueueLimit = 2
+                    }
+                )
+            );
+
+            options.OnRejected = async (context, token) =>
+            {
+                context.HttpContext.Response.ContentType = "application/json";
+
+                var response = new ErrorResponse
+                {
+                    Message = "Too many requests. Please try again later.",
+                    Code = "RATE_LIMIT_EXCEEDED",
+                    Retryable = true
+                };
+
+                await context.HttpContext.Response.WriteAsJsonAsync(response, token);
+            };
         });
 
         // Database Configuration - MySQL
@@ -122,18 +154,8 @@ internal class Program
         builder.Services.AddMemoryCache(); // L1 cache
 
         // Distributed Cache - In-memory for development, Redis for production
-        if (builder.Environment.IsProduction())
-        {
-            //builder.Services.AddStackExchangeRedisCache(options =>
-            //{
-            //    options.Configuration = builder.Configuration.GetConnectionString("Redis");
-            //    options.InstanceName = "BankingAPI_";
-            //});
-        }
-        else
-        {
-            builder.Services.AddDistributedMemoryCache(); // L2 cache (in-memory for development)
-        }
+
+        builder.Services.AddDistributedMemoryCache();
 
         // Response Caching
         builder.Services.AddResponseCaching();
@@ -196,14 +218,13 @@ internal class Program
         // Important: Static files might be needed for Swagger
         app.UseStaticFiles();
 
-        // Custom middleware - ORDER MATTERS!
+        // Custom middleware 
         app.UseMiddleware<CorrelationIdMiddleware>();
         app.UseMiddleware<GlobalExceptionHandler>();
 
         app.UseAuthentication();
         app.UseAuthorization();
 
-        // Rate limiting - should come after auth but before controllers
         app.UseIpRateLimiting();
 
         app.MapControllers();
