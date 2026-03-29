@@ -16,7 +16,6 @@ public class TransactionValidatorTests
     private readonly IBankingDbContext _dbContext;
     private readonly ILogger<TransactionValidator> _logger;
     private readonly IConfiguration _configuration;
-    private readonly IAntiFraudService _antiFraudService;
     private readonly TransactionValidator _validator;
 
     public TransactionValidatorTests()
@@ -24,10 +23,9 @@ public class TransactionValidatorTests
         _dbContext = Substitute.For<IBankingDbContext>();
         _logger = Substitute.For<ILogger<TransactionValidator>>();
         _configuration = Substitute.For<IConfiguration>();
-        _antiFraudService = Substitute.For<IAntiFraudService>();
 
         SetupConfiguration();
-        _validator = new TransactionValidator(_dbContext, _logger, _configuration, _antiFraudService);
+        _validator = new TransactionValidator(_dbContext, _logger, _configuration);
     }
 
     private void SetupConfiguration()
@@ -80,8 +78,8 @@ public class TransactionValidatorTests
         _dbContext.Transactions.Where(Arg.Any<System.Linq.Expressions.Expression<Func<Transaction, bool>>>())
             .Returns(Substitute.For<IQueryable<Transaction>>());
 
-        _antiFraudService.CheckTransactionAsync(Arg.Any<Account>(), Arg.Any<Account>(), Arg.Any<decimal>(), Arg.Any<CancellationToken>())
-            .Returns(new FraudCheckResult { IsApproved = true });
+        //_antiFraudService.CheckTransactionAsync(Arg.Any<Account>(), Arg.Any<Account>(), Arg.Any<decimal>(), Arg.Any<CancellationToken>())
+        //    .Returns(new FraudCheckResult { IsApproved = true });
 
         // Act
         var result = await _validator.ValidateTransferAsync(senderAccount, "789012", 100);

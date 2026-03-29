@@ -8,6 +8,7 @@ public class TransactionConfiguration : IEntityTypeConfiguration<Transaction>
 {
     public void Configure(EntityTypeBuilder<Transaction> builder)
     {
+        builder.ToTable("Transactions");
         builder.HasKey(t => t.Id);
         builder.Property(t => t.Id).ValueGeneratedOnAdd();
 
@@ -31,6 +32,12 @@ public class TransactionConfiguration : IEntityTypeConfiguration<Transaction>
 
         builder.Property(t => t.IdempotencyKey)
             .HasMaxLength(255);
+
+        builder.Property(a => a.CreatedAt)
+            .IsRequired();
+
+        builder.Property(a => a.Timestamp)
+            .IsRequired();
 
         builder.HasIndex(t => t.SenderId);
         builder.HasIndex(t => t.RecipientId);

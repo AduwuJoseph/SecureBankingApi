@@ -8,15 +8,13 @@ public class RefreshTokenConfiguration : IEntityTypeConfiguration<RefreshToken>
 {
     public void Configure(EntityTypeBuilder<RefreshToken> builder)
     {
+        builder.ToTable("RefreshTokens");
         builder.HasKey(rt => rt.Id);
         builder.Property(rt => rt.Id).ValueGeneratedOnAdd();
 
         builder.Property(rt => rt.Token)
             .IsRequired()
-            .HasMaxLength(500);
-
-        builder.HasIndex(rt => rt.Token)
-            .IsUnique();
+            .HasMaxLength(1000);
 
         builder.Property(rt => rt.JwtId)
             .IsRequired()
@@ -31,7 +29,7 @@ public class RefreshTokenConfiguration : IEntityTypeConfiguration<RefreshToken>
             .HasMaxLength(50);
 
         builder.Property(rt => rt.RevokedReason)
-            .HasMaxLength(500);
+            .HasMaxLength(1000);
 
         builder.HasOne(rt => rt.User)
             .WithMany(u => u.RefreshTokens)

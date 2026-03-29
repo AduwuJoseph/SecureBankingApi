@@ -302,7 +302,7 @@ public class TransferService : ITransferService
             var senderLedger = new AccountLedger
             {
                 UserId = senderId,
-                TransactionReference = transaction.Id.ToString(), // Will be updated after save
+                TransactionId  = transaction.Id,
                 EntryType = LedgerEntryType.Debit,
                 Amount = transferRequest.Amount,
                 PreviousBalance = senderBalanceBefore,
@@ -314,7 +314,7 @@ public class TransferService : ITransferService
             var recipientLedger = new AccountLedger
             {
                 UserId = recipient.Id,
-                TransactionReference = transaction.TransactionReference, 
+                TransactionId  = transaction.Id, 
                 EntryType = LedgerEntryType.Credit,
                 Amount = transferRequest.Amount,
                 PreviousBalance = recipientBalanceBefore,
@@ -331,8 +331,8 @@ public class TransferService : ITransferService
             await _context.SaveChangesAsync(cancellationToken);
 
             // Update ledger entries with correct transaction reference
-            senderLedger.TransactionReference = transaction.Id.ToString();
-            recipientLedger.TransactionReference = transaction.Id.ToString();
+            senderLedger.TransactionId  = transaction.Id;
+            recipientLedger.TransactionId  = transaction.Id;
 
             await _context.SaveChangesAsync(cancellationToken);
 
