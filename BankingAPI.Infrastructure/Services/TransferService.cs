@@ -202,199 +202,201 @@ public class TransferService : ITransferService
         CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
+        var strategy = _context.Database.CreateExecutionStrategy();
 
-        await using var dbTransaction = await _context.BeginTransactionAsync(cancellationToken);
-
-        try
+        return await strategy.ExecuteAsync(async () =>
         {
-            // Get sender's account with concurrency token tracking
-            var senderAccount = await _context.Accounts
-                .FirstOrDefaultAsync(a => a.UserId == senderId, cancellationToken);
+            await using var dbTransaction = await _context.BeginTransactionAsync(cancellationToken);
 
-            if (senderAccount == null)
+            try
             {
-                throw new NotFoundException($"Account for user {senderId} not found");
-            }
+                // Get sender's account with concurrency token tracking
+                var senderAccount = await _context.Accounts
+                    .FirstOrDefaultAsync(a => a.UserId == senderId, cancellationToken);
 
-            // Store original row version for tracking
-            var originalRowVersion = senderAccount.RowVersion;
+                if (senderAccount == null)
+                {
+                    throw new NotFoundException($"Account for user {senderId} not found");
+                }
 
-            // Check sufficient balance
-            if (senderAccount.Balance < transferRequest.Amount)
-            {
-                throw new BusinessRuleException(
-                    $"Insufficient balance. Current balance: {senderAccount.Balance:C}");
-            }
+                // Store original row version for tracking
+                var originalRowVersion = senderAccount.RowVersion;
 
-            // Get recipient user
-            var recipient = await _context.Accounts
-                .FirstOrDefaultAsync(u => u.AccountNumber == transferRequest.RecipientAccountNumber, cancellationToken);
+                // Check sufficient balance
+                if (senderAccount.Balance < transferRequest.Amount)
+                {
+                    throw new BusinessRuleException(
+                        $"Insufficient balance. Current balance: {senderAccount.Balance:C}");
+                }
 
-            if (recipient == null)
-            {
-                throw new NotFoundException($"Recipient with account number {transferRequest.RecipientAccountNumber} not found");
-            }
+                // Get recipient user
+                var recipient = await _context.Accounts
+                    .FirstOrDefaultAsync(u => u.AccountNumber == transferRequest.RecipientAccountNumber, cancellationToken);
 
-            // Prevent self-transfer
-            if (senderId == recipient.Id)
-            {
-                throw new BusinessRuleException("Cannot transfer money to yourself");
-            }
+                if (recipient == null)
+                {
+                    throw new NotFoundException($"Recipient with account number {transferRequest.RecipientAccountNumber} not found");
+                }
 
-            // Get recipient's account with concurrency token tracking
-            var recipientAccount = await _context.Accounts
-                .FirstOrDefaultAsync(a => a.UserId == recipient.Id, cancellationToken);
+                // Prevent self-transfer
+                if (senderId == recipient.Id)
+                {
+                    throw new BusinessRuleException("Cannot transfer money to yourself");
+                }
 
-            if (recipientAccount == null)
-            {
-                throw new NotFoundException($"Account for recipient {recipient.Id} not found");
-            }
+                // Get recipient's account with concurrency token tracking
+                var recipientAccount = await _context.Accounts
+                    .FirstOrDefaultAsync(a => a.UserId == recipient.Id, cancellationToken);
+
+                if (recipientAccount == null)
+                {
+                    throw new NotFoundException($"Account for recipient {recipient.Id} not found");
+                }
 
 
-            // Validate transfer before processing
-            var validationResult = await _transactionValidator.ValidateTransferAsync(
-                senderAccount,
-                transferRequest.RecipientAccountNumber,
-                transferRequest.Amount,
-                cancellationToken);
+                // Validate transfer before processing
+                var validationResult = await _transactionValidator.ValidateTransferAsync(
+                    senderAccount,
+                    transferRequest.RecipientAccountNumber,
+                    transferRequest.Amount,
+                    cancellationToken);
 
-            if (!validationResult.IsValid)
-            {
-                _logger.LogWarning(
-                    "Transfer validation failed for User {UserId}: {Errors}",
+                if (!validationResult.IsValid)
+                {
+                    _logger.LogWarning(
+                        "Transfer validation failed for User {UserId}: {Errors}",
+                        senderId,
+                        string.Join(", ", validationResult.Errors.Select(e => e.Message)));
+
+                    throw new ValidationException($"Transfer validation failed: {validationResult.Errors.Select(e => e.Message).ToList()}. Warnings: {validationResult.Warnings.ToList()}");
+                }
+
+                // Store original recipient row version
+                var originalRecipientRowVersion = recipientAccount.RowVersion;
+
+                // Store balances before update
+                var senderBalanceBefore = senderAccount.Balance;
+                var recipientBalanceBefore = recipientAccount.Balance;
+
+                // Update balances
+                senderAccount.Balance -= transferRequest.Amount;
+                senderAccount.LastUpdated = DateTime.UtcNow;
+
+                recipientAccount.Balance += transferRequest.Amount;
+                recipientAccount.LastUpdated = DateTime.UtcNow;
+
+                // Create transaction record
+                var transaction = new Domain.Entities.Transaction
+                {
+                    SenderId = senderId,
+                    RecipientId = recipient.Id,
+                    Amount = transferRequest.Amount,
+                    Description = transferRequest.Description,
+                    TransactionType = transferRequest.TransactionType,
+                    Timestamp = DateTime.UtcNow,
+                    Status = TransactionStatus.Completed,
+                    IdempotencyKey = idempotencyKey,
+                    TransactionReference = GenerateTransactionReference(await CountTransactionAsync())
+                };
+
+                await _context.Transactions.AddAsync(transaction, cancellationToken);
+                await _context.SaveChangesAsync(cancellationToken);
+
+                // Create ledger entries
+                var senderLedger = new AccountLedger
+                {
+                    UserId = senderId,
+                    AccountId = senderAccount.Id,
+                    TransactionId = transaction.Id,
+                    EntryType = LedgerEntryType.Debit,
+                    Amount = transferRequest.Amount,
+                    PreviousBalance = senderBalanceBefore,
+                    NewBalance = senderAccount.Balance,
+                    Description = $"Transfer to {recipient.AccountNumber}",
+                    CreatedAt = DateTime.UtcNow
+                };
+
+                var recipientLedger = new AccountLedger
+                {
+                    UserId = recipient.UserId,
+                    AccountId = recipient.Id,
+                    TransactionId = transaction.Id,
+                    EntryType = LedgerEntryType.Credit,
+                    Amount = transferRequest.Amount,
+                    PreviousBalance = recipientBalanceBefore,
+                    NewBalance = recipientAccount.Balance,
+                    Description = $"Transfer from {senderAccount.User?.Email ?? "Unknown"}",
+                    CreatedAt = DateTime.UtcNow
+                };
+
+                await _context.AccountLedgers.AddRangeAsync(
+                    new[] { senderLedger, recipientLedger },
+                    cancellationToken);
+
+                // Save changes - this will trigger concurrency check
+                await _context.SaveChangesAsync(cancellationToken);
+
+
+                // Commit the transaction
+                await dbTransaction.CommitAsync(cancellationToken);
+
+                _logger.LogInformation(
+                    "Transfer successful: {Amount:C} from user {SenderId} to user {RecipientId}, " +
+                    "TransactionId: {TransactionId}, " +
+                    "Sender RowVersion changed from {OldVersion} to {NewVersion}, " +
+                    "Recipient RowVersion changed from {OldRecipientVersion} to {NewRecipientVersion}",
+                    transferRequest.Amount,
                     senderId,
-                    string.Join(", ", validationResult.Errors.Select(e => e.Message)));
+                    recipient.Id,
+                    transaction.Id,
+                    Convert.ToBase64String(originalRowVersion),
+                    Convert.ToBase64String(senderAccount.RowVersion),
+                    Convert.ToBase64String(originalRecipientRowVersion),
+                    Convert.ToBase64String(recipientAccount.RowVersion));
 
-                throw new ValidationException($"Transfer validation failed: {validationResult.Errors.Select(e => e.Message).ToList()}. Warnings: {validationResult.Warnings.ToList()}");
+                // Log audit
+                await _auditService.LogAsync(
+                    "Transfer",
+                    $"Transfer of {transferRequest.Amount:C} from {senderId} to {recipient.Id}, TransactionId: {transaction.Id}",
+                    senderId.ToString());
+
+                // Invalidate caches
+                await InvalidateTransferCachesAsync(senderId, cancellationToken);
+
+                var response = new TransferResponse
+                {
+                    Success = true,
+                    Message = "Transfer successful",
+                    TransactionReference = transaction.TransactionReference,
+                    NewBalance = senderAccount.Balance,
+                    IsIdempotentResponse = false,
+                    RowVersion = Convert.ToBase64String(senderAccount.RowVersion)
+                };
+
+                // Cache the response
+                await _idempotencyService.CacheResponseAsync(
+                    idempotencyKey,
+                    response);
+
+                return response;
             }
-
-            // Store original recipient row version
-            var originalRecipientRowVersion = recipientAccount.RowVersion;
-
-            // Store balances before update
-            var senderBalanceBefore = senderAccount.Balance;
-            var recipientBalanceBefore = recipientAccount.Balance;
-
-            // Update balances
-            senderAccount.Balance -= transferRequest.Amount;
-            senderAccount.LastUpdated = DateTime.UtcNow;
-
-            recipientAccount.Balance += transferRequest.Amount;
-            recipientAccount.LastUpdated = DateTime.UtcNow;
-
-            // Create transaction record
-            var transaction = new Domain.Entities.Transaction
+            catch (DbUpdateConcurrencyException ex) when (cancellationToken.IsCancellationRequested == false)
             {
-                SenderId = senderId,
-                RecipientId = recipient.Id,
-                Amount = transferRequest.Amount,
-                Description = transferRequest.Description,
-                TransactionType = transferRequest.TransactionType,                
-                Timestamp = DateTime.UtcNow,
-                Status = TransactionStatus.Completed,
-                IdempotencyKey = idempotencyKey,
-                TransactionReference = GenerateTransactionReference(await CountTransactionAsync())
-            };
+                await dbTransaction.RollbackAsync(cancellationToken);
 
-            await _context.Transactions.AddAsync(transaction, cancellationToken);
+                // Log concurrency conflict details
+                await LogConcurrencyConflictAsync(ex, senderId, cancellationToken);
 
-            // Create ledger entries
-            var senderLedger = new AccountLedger
+                throw new ConcurrencyException(
+                    "The account balance was modified by another transaction. Please refresh and try again.");
+            }
+            catch (Exception ex) when (ex is not DomainException && ex is not OperationCanceledException)
             {
-                UserId = senderId,
-                TransactionReference = transaction.Id.ToString(), // Will be updated after save
-                EntryType = LedgerEntryType.Debit,
-                Amount = transferRequest.Amount,
-                PreviousBalance = senderBalanceBefore,
-                NewBalance = senderAccount.Balance,
-                Description = $"Transfer to {recipient.AccountNumber}",
-                CreatedAt = DateTime.UtcNow
-            };
-
-            var recipientLedger = new AccountLedger
-            {
-                UserId = recipient.Id,
-                TransactionReference = transaction.TransactionReference, 
-                EntryType = LedgerEntryType.Credit,
-                Amount = transferRequest.Amount,
-                PreviousBalance = recipientBalanceBefore,
-                NewBalance = recipientAccount.Balance,
-                Description = $"Transfer from {senderAccount.User?.Email ?? "Unknown"}",
-                CreatedAt = DateTime.UtcNow
-            };
-
-            await _context.AccountLedgers.AddRangeAsync(
-                new[] { senderLedger, recipientLedger },
-                cancellationToken);
-
-            // Save changes - this will trigger concurrency check
-            await _context.SaveChangesAsync(cancellationToken);
-
-            // Update ledger entries with correct transaction reference
-            senderLedger.TransactionReference = transaction.Id.ToString();
-            recipientLedger.TransactionReference = transaction.Id.ToString();
-
-            await _context.SaveChangesAsync(cancellationToken);
-
-            // Commit the transaction
-            await dbTransaction.CommitAsync(cancellationToken);
-
-            _logger.LogInformation(
-                "Transfer successful: {Amount:C} from user {SenderId} to user {RecipientId}, " +
-                "TransactionId: {TransactionId}, " +
-                "Sender RowVersion changed from {OldVersion} to {NewVersion}, " +
-                "Recipient RowVersion changed from {OldRecipientVersion} to {NewRecipientVersion}",
-                transferRequest.Amount,
-                senderId,
-                recipient.Id,
-                transaction.Id,
-                Convert.ToBase64String(originalRowVersion),
-                Convert.ToBase64String(senderAccount.RowVersion),
-                Convert.ToBase64String(originalRecipientRowVersion),
-                Convert.ToBase64String(recipientAccount.RowVersion));
-
-            // Log audit
-            await _auditService.LogAsync(
-                "Transfer",
-                $"Transfer of {transferRequest.Amount:C} from {senderId} to {recipient.Id}, TransactionId: {transaction.Id}",
-                senderId.ToString());
-
-            // Invalidate caches
-            await InvalidateTransferCachesAsync(senderId, cancellationToken);
-
-            var response = new TransferResponse
-            {
-                Success = true,
-                Message = "Transfer successful",
-                TransactionReference = transaction.TransactionReference,
-                NewBalance = senderAccount.Balance,
-                IsIdempotentResponse = false,
-                RowVersion = Convert.ToBase64String(senderAccount.RowVersion)
-            };
-
-            // Cache the response
-            await _idempotencyService.CacheResponseAsync(
-                idempotencyKey,
-                response);
-
-            return response;
-        }
-        catch (DbUpdateConcurrencyException ex) when (cancellationToken.IsCancellationRequested == false)
-        {
-            await dbTransaction.RollbackAsync(cancellationToken);
-
-            // Log concurrency conflict details
-            await LogConcurrencyConflictAsync(ex, senderId, cancellationToken);
-
-            throw new ConcurrencyException(
-                "The account balance was modified by another transaction. Please refresh and try again.");
-        }
-        catch (Exception ex) when (ex is not DomainException && ex is not OperationCanceledException)
-        {
-            await dbTransaction.RollbackAsync(cancellationToken);
-            _logger.LogError(ex, "Error during transfer execution for user {SenderId}", senderId);
-            throw;
-        }
+                await dbTransaction.RollbackAsync(cancellationToken);
+                _logger.LogError(ex, "Error during transfer execution for user {SenderId}", senderId);
+                throw;
+            }
+        });
     }
 
     private string GenerateTransactionReference(long? transactionId)

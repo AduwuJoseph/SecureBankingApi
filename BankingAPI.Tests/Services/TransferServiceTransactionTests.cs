@@ -14,7 +14,7 @@ using NSubstitute;
 
 namespace BankingAPI.UnitTests.Services;
 
-public class TransferServiceTransactionTests : IDisposable
+public class TransferServiceTransactionTests
 {
     private readonly IBankingDbContext _context;
     private readonly ILogger<TransferService> _logger;

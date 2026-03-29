@@ -13,76 +13,80 @@ using Serilog;
 using Serilog.Events;
 using Serilog.Formatting.Json;
 
-var builder = WebApplication.CreateBuilder(args);
-
-// Configure Serilog
-Log.Logger = new LoggerConfiguration()
-    .ReadFrom.Configuration(builder.Configuration)
-    .Enrich.FromLogContext()
-    .Enrich.WithCorrelationId()
-    .Enrich.WithProperty("Application", "BankingAPI")
-    .Enrich.WithProperty("Environment", builder.Environment.EnvironmentName)
-    .WriteTo.Console(
-        outputTemplate: "[{Timestamp:HH:mm:ss} {Level:u3}] {CorrelationId} {Message:lj}{NewLine}{Exception}",
-        restrictedToMinimumLevel: LogEventLevel.Information)
-    .WriteTo.File(
-        new JsonFormatter(),
-        "logs/audit-.json",
-        rollingInterval: RollingInterval.Day,
-        restrictedToMinimumLevel: LogEventLevel.Information)
-    .WriteTo.File(
-        "logs/error-.txt",
-        rollingInterval: RollingInterval.Day,
-        restrictedToMinimumLevel: LogEventLevel.Error)
-    .CreateLogger();
-
-builder.Host.UseSerilog();
-
-// Add services
-builder.Services.AddControllers(options =>
+internal class Program
 {
-    options.Filters.Add<IdempotencyFilter>();
-    options.Filters.Add<GlobalExceptionFilter>();
-})
-.AddJsonOptions(options =>
-{
-    options.JsonSerializerOptions.PropertyNamingPolicy = System.Text.Json.JsonNamingPolicy.CamelCase;
-    options.JsonSerializerOptions.DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull;
-    options.JsonSerializerOptions.Converters.Add(new System.Text.Json.Serialization.JsonStringEnumConverter());
-});
-
-builder.Services.AddEndpointsApiExplorer();
-
-builder.Services.AddSwaggerGen(c =>
-{
-    c.SwaggerDoc("v1", new OpenApiInfo
+    private static async Task Main(string[] args)
     {
-        Title = "Banking API",
-        Version = "v1",
-        Description = "A comprehensive banking API with clean architecture, caching, and security",
-        Contact = new OpenApiContact
+        var builder = WebApplication.CreateBuilder(args);
+
+        // Configure Serilog
+        Log.Logger = new LoggerConfiguration()
+            .ReadFrom.Configuration(builder.Configuration)
+            .Enrich.FromLogContext()
+            .Enrich.WithCorrelationId()
+            .Enrich.WithProperty("Application", "BankingAPI")
+            .Enrich.WithProperty("Environment", builder.Environment.EnvironmentName)
+            .WriteTo.Console(
+                outputTemplate: "[{Timestamp:HH:mm:ss} {Level:u3}] {CorrelationId} {Message:lj}{NewLine}{Exception}",
+                restrictedToMinimumLevel: LogEventLevel.Information)
+            .WriteTo.File(
+                new JsonFormatter(),
+                "logs/audit-.json",
+                rollingInterval: RollingInterval.Day,
+                restrictedToMinimumLevel: LogEventLevel.Information)
+            .WriteTo.File(
+                "logs/error-.txt",
+                rollingInterval: RollingInterval.Day,
+                restrictedToMinimumLevel: LogEventLevel.Error)
+            .CreateLogger();
+
+        builder.Host.UseSerilog();
+
+        // Add services
+        builder.Services.AddControllers(options =>
         {
-            Name = "Banking API Support",
-            Email = "aduwujoseph@gmail.com"
-        },
-        License = new OpenApiLicense
+            options.Filters.Add<IdempotencyFilter>();
+            options.Filters.Add<GlobalExceptionFilter>();
+        })
+        .AddJsonOptions(options =>
         {
-            Name = "MIT License",
-            Url = new Uri("https://opensource.org/licenses/MIT")
-        }
-    });
+            options.JsonSerializerOptions.PropertyNamingPolicy = System.Text.Json.JsonNamingPolicy.CamelCase;
+            options.JsonSerializerOptions.DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull;
+            options.JsonSerializerOptions.Converters.Add(new System.Text.Json.Serialization.JsonStringEnumConverter());
+        });
 
-    c.AddSecurityDefinition("Bearer", new OpenApiSecurityScheme
-    {
-        Description = "JWT Authorization header using the Bearer scheme. Enter 'Bearer' [space] and then your token",
-        Name = "Authorization",
-        In = ParameterLocation.Header,
-        Type = SecuritySchemeType.ApiKey,
-        Scheme = "Bearer"
-    });
+        builder.Services.AddEndpointsApiExplorer();
 
-    c.AddSecurityRequirement(new OpenApiSecurityRequirement
-    {
+        builder.Services.AddSwaggerGen(c =>
+        {
+            c.SwaggerDoc("v1", new OpenApiInfo
+            {
+                Title = "Banking API",
+                Version = "v1",
+                Description = "A comprehensive banking API with clean architecture, caching, and security",
+                Contact = new OpenApiContact
+                {
+                    Name = "Banking API Support",
+                    Email = "aduwujoseph@gmail.com"
+                },
+                License = new OpenApiLicense
+                {
+                    Name = "MIT License",
+                    Url = new Uri("https://opensource.org/licenses/MIT")
+                }
+            });
+
+            c.AddSecurityDefinition("Bearer", new OpenApiSecurityScheme
+            {
+                Description = "JWT Authorization header using the Bearer scheme. Enter 'Bearer' [space] and then your token",
+                Name = "Authorization",
+                In = ParameterLocation.Header,
+                Type = SecuritySchemeType.ApiKey,
+                Scheme = "Bearer"
+            });
+
+            c.AddSecurityRequirement(new OpenApiSecurityRequirement
+            {
         {
             new OpenApiSecurityScheme
             {
@@ -94,142 +98,148 @@ builder.Services.AddSwaggerGen(c =>
             },
             Array.Empty<string>()
         }
-    });
-});
-
-// Database Configuration - MySQL
-var connectionString = builder.Configuration.GetConnectionString("DefaultConnection");
-builder.Services.AddDbContext<BankingDbContext>(options =>
-{
-    options.UseMySql(connectionString, ServerVersion.AutoDetect(connectionString),
-        mysqlOptions =>
-        {
-            mysqlOptions.EnableRetryOnFailure(
-                maxRetryCount: 5,
-                maxRetryDelay: TimeSpan.FromSeconds(30),
-                errorNumbersToAdd: null);
-            mysqlOptions.CommandTimeout(60);
+            });
         });
-    options.EnableSensitiveDataLogging(builder.Environment.IsDevelopment());
-    options.EnableDetailedErrors(builder.Environment.IsDevelopment());
-});
 
-// Caching Configuration
-builder.Services.AddMemoryCache(); // L1 cache
+        // Database Configuration - MySQL
+        var connectionString = builder.Configuration.GetConnectionString("DefaultConnection");
+        builder.Services.AddDbContext<BankingDbContext>(options =>
+        {
+            options.UseMySql(connectionString, ServerVersion.AutoDetect(connectionString),
+                mysqlOptions =>
+                {
+                    mysqlOptions.EnableRetryOnFailure(
+                        maxRetryCount: 5,
+                        maxRetryDelay: TimeSpan.FromSeconds(30),
+                        errorNumbersToAdd: null);
+                    mysqlOptions.CommandTimeout(60);
+                });
+            options.EnableSensitiveDataLogging(builder.Environment.IsDevelopment());
+            options.EnableDetailedErrors(builder.Environment.IsDevelopment());
+        });
 
-// Distributed Cache - In-memory for development, Redis for production
-if (builder.Environment.IsProduction())
-{
-    //builder.Services.AddStackExchangeRedisCache(options =>
-    //{
-    //    options.Configuration = builder.Configuration.GetConnectionString("Redis");
-    //    options.InstanceName = "BankingAPI_";
-    //});
-}
-else
-{
-    builder.Services.AddDistributedMemoryCache(); // L2 cache (in-memory for development)
-}
+        // Caching Configuration
+        builder.Services.AddMemoryCache(); // L1 cache
 
-// Response Caching
-builder.Services.AddResponseCaching();
+        // Distributed Cache - In-memory for development, Redis for production
+        if (builder.Environment.IsProduction())
+        {
+            //builder.Services.AddStackExchangeRedisCache(options =>
+            //{
+            //    options.Configuration = builder.Configuration.GetConnectionString("Redis");
+            //    options.InstanceName = "BankingAPI_";
+            //});
+        }
+        else
+        {
+            builder.Services.AddDistributedMemoryCache(); // L2 cache (in-memory for development)
+        }
 
-// Application Services Registration
+        // Response Caching
+        builder.Services.AddResponseCaching();
 
-// DbContext
-builder.Services.AddScoped<IBankingDbContext, BankingDbContext>();
+        // Application Services Registration
 
-// Core Services
-builder.Services.AddScoped<IAuthService, AuthService>();
-builder.Services.AddScoped<IAccountService, AccountService>();
-builder.Services.AddScoped<IAccountLedgerService, AccountLedgerService>();
-builder.Services.AddScoped<ITransferService, TransferService>();
-builder.Services.AddScoped<ITransactionService, TransactionService>();
-builder.Services.AddScoped<ITransactionValidator, TransactionValidator>();
+        // DbContext
+        builder.Services.AddScoped<IBankingDbContext, BankingDbContext>();
 
-// Infrastructure Services
-builder.Services.AddScoped<IAuditService, AuditService>();
-builder.Services.AddScoped<IAntiFraudService, MockAntiFraudService>(); 
-builder.Services.AddScoped<IPasswordHasher, PasswordHasher>();
-builder.Services.AddScoped<IIdempotencyService, IdempotencyService>();
-builder.Services.AddScoped<CurrentUserService>();
-builder.Services.AddHttpContextAccessor();
+        // Core Services
+        builder.Services.AddScoped<IAuthService, AuthService>();
+        builder.Services.AddScoped<IAccountService, AccountService>();
+        builder.Services.AddScoped<IAccountLedgerService, AccountLedgerService>();
+        builder.Services.AddScoped<ITransferService, TransferService>();
+        builder.Services.AddScoped<ITransactionService, TransactionService>();
+        builder.Services.AddScoped<ITransactionValidator, TransactionValidator>();
 
-// Configure JWT Authentication
-builder.Services.AddJwtAuthentication(builder.Configuration);
+        // Infrastructure Services
+        builder.Services.AddScoped<IAuditService, AuditService>();
+        //builder.Services.AddScoped<IAntiFraudService, MockAntiFraudService>();
+        builder.Services.AddScoped<IPasswordHasher, PasswordHasher>();
+        builder.Services.AddScoped<IIdempotencyService, IdempotencyService>();
+        builder.Services.AddScoped<CurrentUserService>();
+        builder.Services.AddHttpContextAccessor();
 
-// Configure Rate Limiting
-builder.Services.AddRateLimiting(builder.Configuration);
+        // Configure JWT Authentication
+        builder.Services.AddJwtAuthentication(builder.Configuration);
 
-// Configure CORS
-builder.Services.AddCors(options =>
-{
-    options.AddPolicy("AllowAll", policy =>
-    {
-        policy.AllowAnyOrigin()
-              .AllowAnyMethod()
-              .AllowAnyHeader();
-    });
-});
+        // Configure Rate Limiting
+        builder.Services.AddRateLimiting(builder.Configuration);
 
-var app = builder.Build();
+        // Configure CORS
+        builder.Services.AddCors(options =>
+        {
+            options.AddPolicy("AllowAll", policy =>
+            {
+                policy.AllowAnyOrigin()
+                      .AllowAnyMethod()
+                      .AllowAnyHeader();
+            });
+        });
 
-// Configure the HTTP request pipeline
-if (app.Environment.IsDevelopment())
-{
-    app.UseSwagger();
-    app.UseSwaggerUI(c =>
-    {
-        c.SwaggerEndpoint("/swagger/v1/swagger.json", "Banking API v1");
-        c.RoutePrefix = string.Empty;
-    });
-}
+        var app = builder.Build();
 
-app.UseHttpsRedirection();
-app.UseCors("AllowAll");
+        // Configure the HTTP request pipeline
+        // Configure the HTTP request pipeline
+        if (app.Environment.IsDevelopment())
+        {
+            app.UseSwagger();
+            app.UseSwaggerUI(c =>
+            {
+                c.SwaggerEndpoint("/swagger/v1/swagger.json", "Banking API v1");
+                c.RoutePrefix = "swagger";  // This makes Swagger UI available at /swagger
+            });
+        }
 
-// Custom middleware
-app.UseMiddleware<CorrelationIdMiddleware>();
-app.UseMiddleware<GlobalExceptionHandler>();
+        app.UseHttpsRedirection();
+        app.UseCors("AllowAll");
 
-app.UseAuthentication();
-app.UseAuthorization();
+        // Important: Static files might be needed for Swagger
+        app.UseStaticFiles();
 
-// Rate limiting
-app.UseIpRateLimiting();
+        // Custom middleware - ORDER MATTERS!
+        app.UseMiddleware<CorrelationIdMiddleware>();
+        app.UseMiddleware<GlobalExceptionHandler>();
 
-app.MapControllers();
+        app.UseAuthentication();
+        app.UseAuthorization();
 
-// Ensure database is created
-using (var scope = app.Services.CreateScope())
-{
-    try
-    {
-        var context = scope.ServiceProvider.GetRequiredService<BankingDbContext>();
+        // Rate limiting - should come after auth but before controllers
+        app.UseIpRateLimiting();
 
-        // Apply migrations first (important)
-        await context.Database.MigrateAsync();
+        app.MapControllers();
 
-        // Seed data
-        await DatabaseSeeder.SeedAsync(context);
+        // Ensure database is created
+        using (var scope = app.Services.CreateScope())
+        {
+            try
+            {
+                var context = scope.ServiceProvider.GetRequiredService<BankingDbContext>();
+
+                // Apply migrations first (important)
+                await context.Database.MigrateAsync();
+
+                // Seed data
+                await DatabaseSeeder.SeedAsync(context);
+            }
+            catch (Exception ex)
+            {
+                var logger = scope.ServiceProvider.GetRequiredService<ILogger<Program>>();
+                logger.LogError(ex, "An error occurred while seeding the database.");
+            }
+        }
+
+        try
+        {
+            Log.Information("Starting up the application");
+            app.Run();
+        }
+        catch (Exception ex)
+        {
+            Log.Fatal(ex, "Application start-up failed");
+        }
+        finally
+        {
+            Log.CloseAndFlush();
+        }
     }
-    catch (Exception ex)
-    {
-        var logger = scope.ServiceProvider.GetRequiredService<ILogger<Program>>();
-        logger.LogError(ex, "An error occurred while seeding the database.");
-    }
-}
-
-try
-{
-    Log.Information("Starting up the application");
-    app.Run();
-}
-catch (Exception ex)
-{
-    Log.Fatal(ex, "Application start-up failed");
-}
-finally
-{
-    Log.CloseAndFlush();
 }

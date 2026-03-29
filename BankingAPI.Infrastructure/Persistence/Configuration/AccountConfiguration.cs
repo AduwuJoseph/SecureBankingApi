@@ -8,22 +8,43 @@ public class AccountConfiguration : IEntityTypeConfiguration<Account>
 {
     public void Configure(EntityTypeBuilder<Account> builder)
     {
-        builder.HasKey(a => a.UserId);
+        builder.ToTable("Accounts");
+        builder.HasKey(a => a.Id);
+
+        builder.Property(a => a.Id)
+            .IsRequired()
+            .ValueGeneratedOnAdd();
+
+        builder.Property(a => a.AccountNumber)
+            .IsRequired()
+            .HasMaxLength(50);
 
         builder.Property(a => a.Balance)
             .IsRequired()
             .HasPrecision(18, 2);
 
-        builder.Property(a => a.LastUpdated)
+        builder.Property(a => a.Currency)
             .IsRequired()
-            .HasDefaultValueSql("CURRENT_TIMESTAMP");
+            .HasMaxLength(3);
+
+        builder.Property(a => a.LastUpdated)
+            .IsRequired();
+
+        builder.Property(a => a.CreatedAt)
+            .IsRequired();
         // Configure RowVersion as concurrency token
         builder.Property(a => a.RowVersion)
             .IsRequired()
             .IsRowVersion()
             .HasConversion<byte[]>();
 
-        // Add index for concurrency
-        builder.HasIndex(a => a.RowVersion);
+        // Relationships
+        builder.HasMany(a => a.AccountLedgers)
+            .WithOne(al => al.Account)
+            .HasForeignKey(al => al.AccountId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        builder.HasIndex(a => a.AccountNumber).IsUnique();
+        builder.HasIndex(a => a.UserId);
     }
 }

@@ -8,6 +8,7 @@ public class IdempotencyLogConfiguration : IEntityTypeConfiguration<IdempotencyL
 {
     public void Configure(EntityTypeBuilder<IdempotencyLog> builder)
     {
+        builder.ToTable("IdempotencyLogs");
         builder.HasKey(i => i.Id);
         builder.Property(i => i.Id).ValueGeneratedOnAdd();
 
@@ -31,5 +32,8 @@ public class IdempotencyLogConfiguration : IEntityTypeConfiguration<IdempotencyL
 
         builder.Property(i => i.ExpiresAt)
             .IsRequired(false);
+
+        builder.HasIndex(il => il.CreatedAt);
+        builder.HasIndex(il => il.ExpiresAt);
     }
 }

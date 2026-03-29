@@ -14,7 +14,6 @@ public class TransactionValidator : ITransactionValidator
     private readonly IBankingDbContext _dbContext;
     private readonly ILogger<TransactionValidator> _logger;
     private readonly IConfiguration _configuration;
-    private readonly IAntiFraudService _antiFraudService;
 
     // Configurable limits
     private readonly decimal _minimumTransferAmount;
@@ -28,13 +27,11 @@ public class TransactionValidator : ITransactionValidator
     public TransactionValidator(
         IBankingDbContext dbContext,
         ILogger<TransactionValidator> logger,
-        IConfiguration configuration,
-        IAntiFraudService antiFraudService)
+        IConfiguration configuration)
     {
         _dbContext = dbContext;
         _logger = logger;
         _configuration = configuration;
-        _antiFraudService = antiFraudService;
 
         // Load configuration values
         _minimumTransferAmount = configuration.GetValue<decimal>("TransactionLimits:MinimumAmount", 0.01m);
@@ -253,13 +250,13 @@ public class TransactionValidator : ITransactionValidator
         }
 
         // Call external anti-fraud service if configured
-        var fraudCheckResult = await _antiFraudService.CheckTransactionAsync(
-            senderAccount, recipientAccount, amount, cancellationToken);
+        //var fraudCheckResult = await _antiFraudService.CheckTransactionAsync(
+        //    senderAccount, recipientAccount, amount, cancellationToken);
 
-        if (!fraudCheckResult.IsApproved)
-        {
-            result.AddError(fraudCheckResult.Reason ?? "Transaction flagged by fraud detection system");
-        }
+        //if (!fraudCheckResult.IsApproved)
+        //{
+        //    result.AddError(fraudCheckResult.Reason ?? "Transaction flagged by fraud detection system");
+        //}
     }
 
     #endregion

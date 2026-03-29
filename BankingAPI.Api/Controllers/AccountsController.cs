@@ -25,7 +25,7 @@ public class AccountController : ControllerBase
     /// <summary>
     /// Get current user's account information
     /// </summary>
-    [HttpGet("me")]
+    [HttpGet("current-user")]
     [ProducesResponseType(typeof(AccountInfoResponse), StatusCodes.Status200OK)]
     public async Task<IActionResult> GetAccountInfo()
     {

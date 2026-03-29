@@ -2,6 +2,7 @@
 using BankingAPI.Application.DTOs.Auth;
 using BankingAPI.Application.Interfaces;
 using BankingAPI.Domain.Entities;
+using BankingAPI.Domain.Enum;
 using BankingAPI.Domain.Exceptions;
 using BankingAPI.Infrastructure.Data;
 using BCrypt.Net;
@@ -62,10 +63,13 @@ public class AuthService : IAuthService
             FullName = registerRequest.FullName,
             Email = registerRequest.Email,
             PasswordHash = _passwordHasher.HashPassword(registerRequest.Password),
+            PhoneNumber = registerRequest.PhoneNumber,
+            IsActive = true,
             CreatedAt = DateTime.UtcNow
         };
 
         _context.Users.Add(user);
+        await _context.SaveChangesAsync();
 
         // Create account for user
         var account = new Account
@@ -74,7 +78,9 @@ public class AuthService : IAuthService
             Balance = 0,
             AccountNumber = await GenerateUniqueAccountNumberAsync(_context),
             IsActive = true,
-            LastUpdated = DateTime.UtcNow
+            LastUpdated = DateTime.UtcNow,
+            Currency = Currency.NGN.ToString(),
+            CreatedAt = DateTime.UtcNow,
         };
 
         _context.Accounts.Add(account);
