@@ -56,108 +56,47 @@ public class TransferController : ControllerBase
     {
         // Get current user
         var userId = _currentUserService.UserId;
-        try
+        if (!userId.HasValue)
         {
-            if (!userId.HasValue)
-            {
-                return Unauthorized(new ErrorResponse
-                {
-                    Message = "User not authenticated",
-                    Code = "UNAUTHORIZED"
-                });
-            }
-
-            _logger.LogInformation(
-                "Transfer request received from User {UserId} to {RecipientAccountNumber} for amount {Amount}",
-                userId.Value,
-                request.RecipientAccountNumber,
-                request.Amount);
-
-            // Validate request
-            if (!ModelState.IsValid)
-            {
-                return BadRequest(new ValidationErrorResponse
-                {
-                    Message = "Invalid transfer request",
-                    Errors = ModelState.GetErrorMessages()
-                });
-            }
-
-            // Get idempotency key from header or generate one
-            var idempotencyKey = GetIdempotencyKey();
-
-            // Process the transfer
-            var result = await _transferService.TransferFundsAsync(
-                userId.Value,
-                request,
-                idempotencyKey,
-                cancellationToken);
-
-            _logger.LogInformation(
-                "Transfer completed successfully. TransactionId: {TransactionId}, UserId: {UserId}, Amount: {Amount}",
-                result.TransactionReference,
-                userId.Value,
-                request.Amount);
-
-            // Return success response
-            return Ok(result);
-        }
-        catch (NotFoundException ex)
-        {
-            _logger.LogWarning(ex, "Not found error during transfer");
-            return NotFound(new ErrorResponse
-            {
-                Message = ex.Message,
-                Code = "NOT_FOUND"
-            });
-        }
-        catch (BusinessRuleException ex)
-        {
-            _logger.LogWarning(ex, "Business rule violation during transfer");
-            return BadRequest(new ErrorResponse
-            {
-                Message = ex.Message,
-                Code = "BUSINESS_RULE_VIOLATION"
-            });
-        }
-        catch (ConcurrencyException ex)
-        {
-            _logger.LogWarning(ex, "Concurrency conflict during transfer");
-            return Conflict(new ErrorResponse
-            {
-                Message = ex.Message,
-                Code = "CONCURRENCY_CONFLICT",
-                Retryable = true
-            });
-        }
-        catch (UnauthorizedException ex)
-        {
-            _logger.LogWarning(ex, "Unauthorized transfer attempt");
             return Unauthorized(new ErrorResponse
             {
-                Message = ex.Message,
+                Message = "User not authenticated",
                 Code = "UNAUTHORIZED"
             });
         }
-        catch (ValidationException ex)
+
+        // Validate request
+        if (!ModelState.IsValid)
         {
-            _logger.LogWarning(ex, "Validation error during transfer");
-            return BadRequest(new ErrorResponse
+            return BadRequest(new ValidationErrorResponse
             {
-                Message = ex.Message,
-                Code = "VALIDATION_ERROR"
+                Message = "Invalid transfer request",
+                Errors = ModelState.GetErrorMessages()
             });
         }
-        catch (Exception ex)
+
+        // Get idempotency key from header
+        var idempotencyKey = GetIdempotencyKey();
+
+        // Validate request
+        if (string.IsNullOrEmpty(idempotencyKey))
         {
-            _logger.LogError(ex, "Unexpected error during transfer for User {UserId}", userId);
-            return StatusCode(StatusCodes.Status500InternalServerError, new ErrorResponse
+            return BadRequest(new ValidationErrorResponse
             {
-                Message = "An unexpected error occurred. Please try again later.",
-                Code = "INTERNAL_ERROR",
-                RequestId = HttpContext.TraceIdentifier
+                Message = "Invalid transfer request",
+                Errors = new List<string> { "Idempotency key [Idempotency-Key] is required as a header" }
             });
         }
+
+        // Process the transfer
+        var result = await _transferService.TransferFundsAsync(
+            userId.Value,
+            request,
+            idempotencyKey,
+            cancellationToken);
+
+        // Return success response
+        return Ok(result);
     }
 
     /// <summary>
@@ -169,39 +108,27 @@ public class TransferController : ControllerBase
     [ProducesResponseType(typeof(FeeInfoResponse), StatusCodes.Status200OK)]
     public IActionResult GetTransferFee([FromQuery] decimal amount)
     {
-        try
+        if (amount <= 0)
         {
-            if (amount <= 0)
+            return BadRequest(new ErrorResponse
             {
-                return BadRequest(new ErrorResponse
-                {
-                    Message = "Amount must be greater than zero",
-                    Code = "INVALID_AMOUNT"
-                });
-            }
-
-            // Calculate fee based on amount (example: 0.5% with min $1 and max $25)
-            var fee = CalculateFee(amount);
-            var totalAmount = amount + fee;
-
-            return Ok(new FeeInfoResponse
-            {
-                Amount = amount,
-                Fee = fee,
-                TotalAmount = totalAmount,
-                FeePercentage = 0.5m,
-                FeeDescription = "Transaction fee (0.5% with min $1 and max $25)"
+                Message = "Amount must be greater than zero",
+                Code = "INVALID_AMOUNT"
             });
         }
-        catch (Exception ex)
+
+        // Calculate fee based on amount (example: 0.5% with min $1 and max $25)
+        var fee = CalculateFee(amount);
+        var totalAmount = amount + fee;
+
+        return Ok(new FeeInfoResponse
         {
-            _logger.LogError(ex, "Error calculating fee for amount {Amount}", amount);
-            return StatusCode(StatusCodes.Status500InternalServerError, new ErrorResponse
-            {
-                Message = "Error calculating fee",
-                Code = "FEE_CALCULATION_ERROR"
-            });
-        }
+            Amount = amount,
+            Fee = fee,
+            TotalAmount = totalAmount,
+            FeePercentage = 0.5m,
+            FeeDescription = "Transaction fee (0.5% with min $1 and max $25)"
+        });
     }
 
     /// <summary>
@@ -212,41 +139,29 @@ public class TransferController : ControllerBase
     [ProducesResponseType(typeof(TransferLimitsResponse), StatusCodes.Status200OK)]
     public async Task<IActionResult> GetTransferLimits(CancellationToken cancellationToken)
     {
-        try
+        var userId = _currentUserService.UserId;
+        if (!userId.HasValue)
         {
-            var userId = _currentUserService.UserId;
-            if (!userId.HasValue)
+            return Unauthorized(new ErrorResponse
             {
-                return Unauthorized(new ErrorResponse
-                {
-                    Message = "User not authenticated",
-                    Code = "UNAUTHORIZED"
-                });
-            }
-
-            var dailyTotal = await _transferService.GetDailyTransferTotalAsync(userId.Value, cancellationToken);
-            var dailyLimit = 25000m; // Should come from configuration
-            var remainingDaily = Math.Max(0, dailyLimit - dailyTotal);
-
-            return Ok(new TransferLimitsResponse
-            {
-                MinimumAmount = 0.01m,
-                MaximumAmount = 10000m,
-                DailyLimit = dailyLimit,
-                DailyUsed = dailyTotal,
-                DailyRemaining = remainingDaily,
-                Currency = "USD"
+                Message = "User not authenticated",
+                Code = "UNAUTHORIZED"
             });
         }
-        catch (Exception ex)
+
+        var dailyTotal = await _transferService.GetDailyTransferTotalAsync(userId.Value, cancellationToken);
+        var dailyLimit = 25000m; // Should come from configuration
+        var remainingDaily = Math.Max(0, dailyLimit - dailyTotal);
+
+        return Ok(new TransferLimitsResponse
         {
-            _logger.LogError(ex, "Error getting transfer limits for user");
-            return StatusCode(StatusCodes.Status500InternalServerError, new ErrorResponse
-            {
-                Message = "Error retrieving transfer limits",
-                Code = "LIMITS_RETRIEVAL_ERROR"
-            });
-        }
+            MinimumAmount = 0.01m,
+            MaximumAmount = 10000m,
+            DailyLimit = dailyLimit,
+            DailyUsed = dailyTotal,
+            DailyRemaining = remainingDaily,
+            Currency = "USD"
+        });
     }
 
     #region Private Helper Methods
@@ -262,9 +177,7 @@ public class TransferController : ControllerBase
                 return key;
             }
         }
-
-        // Generate a new key if not provided
-        return Guid.NewGuid().ToString();
+        return string.Empty;
     }
 
 

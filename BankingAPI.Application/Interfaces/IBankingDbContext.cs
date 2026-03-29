@@ -1,6 +1,7 @@
-﻿using Microsoft.EntityFrameworkCore;
+﻿using BankingAPI.Domain.Entities;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Storage;
-using BankingAPI.Domain.Entities;
 
 namespace BankingAPI.Application.Interfaces;
 
@@ -45,6 +46,12 @@ public interface IBankingDbContext
     /// <param name="cancellationToken">Cancellation token</param>
     /// <returns>Number of state entries written to the database</returns>
     Task<int> SaveChangesAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Begins a new database transaction
+    /// </summary>
+    /// <returns>Database Facade</returns>
+    DatabaseFacade Database { get; }
 
     /// <summary>
     /// Begins a new database transaction

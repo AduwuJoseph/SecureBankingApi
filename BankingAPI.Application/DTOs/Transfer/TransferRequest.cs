@@ -22,9 +22,6 @@ namespace BankingAPI.Application.DTOs.Transfer
         public string Description { get; set; }
 
         [Required]
-        public string IdempotentKey { get; set; }
-
-        [Required]
         public TransactionType TransactionType { get; set; }
     }
 }

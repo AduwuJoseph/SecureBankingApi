@@ -1,4 +1,5 @@
 ﻿using BankingAPI.Domain.Entities;
+using BankingAPI.Domain.Enum;
 using BankingAPI.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
@@ -27,6 +28,7 @@ namespace BankingAPI.Infrastructure.Data
             };
 
             await context.Users.AddAsync(adminUser);
+            await context.SaveChangesAsync();
 
             // Create admin account
             var adminAccount = new Account
@@ -34,15 +36,16 @@ namespace BankingAPI.Infrastructure.Data
                 UserId = adminUser.Id,
                 AccountNumber = await GenerateUniqueAccountNumberAsync(context),
                 Balance = 1000000,
-                Currency = "NGN",
+                Currency = Currency.NGN.ToString(),
                 IsActive = true,
-                CreatedAt = DateTime.UtcNow
+                CreatedAt = DateTime.UtcNow,
+                LastUpdated = DateTime.UtcNow
             };
 
             await context.Accounts.AddAsync(adminAccount);
 
             // Seed test users
-            for (int i = 1; i <= 5; i++)
+            for (int i = 2; i <= 6; i++)
             {
                 var user = new User
                 {
@@ -55,15 +58,17 @@ namespace BankingAPI.Infrastructure.Data
                 };
 
                 await context.Users.AddAsync(user);
+                await context.SaveChangesAsync();
 
                 var account = new Account
                 {
                     UserId = user.Id,
                     AccountNumber = await GenerateUniqueAccountNumberAsync(context),
                     Balance = 10000,
-                    Currency = "USD",
+                    Currency = Currency.NGN.ToString(),
                     IsActive = true,
-                    CreatedAt = DateTime.UtcNow
+                    CreatedAt = DateTime.UtcNow,
+                    LastUpdated = DateTime.UtcNow
                 };
 
                 await context.Accounts.AddAsync(account);

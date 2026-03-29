@@ -1,4 +1,6 @@
-﻿using BankingAPI.Application.DTOs.Auth;
+﻿using BankingAPI.Api.Extensions;
+using BankingAPI.Application.DTOs.Auth;
+using BankingAPI.Application.DTOs.Errors;
 using BankingAPI.Application.Interfaces;
 using BankingAPI.Application.Services;
 using BankingAPI.Infrastructure.Services;
@@ -33,6 +35,15 @@ public class AuthController : ControllerBase
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     public async Task<IActionResult> Register([FromBody] RegisterRequest registerRequest)
     {
+        // Validate request
+        if (!ModelState.IsValid)
+        {
+            return BadRequest(new ValidationErrorResponse
+            {
+                Message = "Invalid register request",
+                Errors = ModelState.GetErrorMessages()
+            });
+        }
         var deviceInfo = GetDeviceInfo();
         var ipAddress = GetClientIpAddress();
 
@@ -52,6 +63,15 @@ public class AuthController : ControllerBase
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
     public async Task<IActionResult> Login([FromBody] LoginRequest loginRequest)
     {
+        // Validate request
+        if (!ModelState.IsValid)
+        {
+            return BadRequest(new ValidationErrorResponse
+            {
+                Message = "Invalid login request",
+                Errors = ModelState.GetErrorMessages()
+            });
+        }
         var deviceInfo = GetDeviceInfo();
         var ipAddress = GetClientIpAddress();
 

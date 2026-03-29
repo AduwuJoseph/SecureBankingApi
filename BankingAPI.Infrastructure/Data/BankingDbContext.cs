@@ -2,6 +2,7 @@
 using BankingAPI.Domain.Entities;
 using BankingAPI.Infrastructure.Persistence.Configurations;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Storage;
 using System;
 using System.Collections.Generic;
@@ -37,6 +38,8 @@ namespace BankingAPI.Infrastructure.Data
 
             base.OnModelCreating(modelBuilder);
         }
+
+        public DatabaseFacade Database => base.Database;
 
         public async Task<IDbContextTransaction> BeginTransactionAsync(CancellationToken cancellationToken = default)
         {
