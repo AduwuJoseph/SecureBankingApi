@@ -18,7 +18,6 @@ namespace BankingAPI.Infrastructure.Data
             // Seed admin user
             var adminUser = new User
             {
-                Id = Guid.NewGuid(),
                 FullName = "System Administrator",
                 Email = "admin@banking.com",
                 PasswordHash = BCrypt.Net.BCrypt.HashPassword("Admin@123"),
@@ -32,11 +31,10 @@ namespace BankingAPI.Infrastructure.Data
             // Create admin account
             var adminAccount = new Account
             {
-                Id = Guid.NewGuid(),
                 UserId = adminUser.Id,
-                AccountNumber = GenerateAccountNumber(),
+                AccountNumber = await GenerateUniqueAccountNumberAsync(context),
                 Balance = 1000000,
-                Currency = "USD",
+                Currency = "NGN",
                 IsActive = true,
                 CreatedAt = DateTime.UtcNow
             };
@@ -48,7 +46,6 @@ namespace BankingAPI.Infrastructure.Data
             {
                 var user = new User
                 {
-                    Id = Guid.NewGuid(),
                     FullName = $"Test User {i}",
                     Email = $"user{i}@banking.com",
                     PasswordHash = BCrypt.Net.BCrypt.HashPassword("Test@123"),
@@ -61,9 +58,8 @@ namespace BankingAPI.Infrastructure.Data
 
                 var account = new Account
                 {
-                    Id = Guid.NewGuid(),
                     UserId = user.Id,
-                    AccountNumber = GenerateAccountNumber(),
+                    AccountNumber = await GenerateUniqueAccountNumberAsync(context),
                     Balance = 10000,
                     Currency = "USD",
                     IsActive = true,
@@ -76,10 +72,28 @@ namespace BankingAPI.Infrastructure.Data
             await context.SaveChangesAsync();
         }
 
-        private static string GenerateAccountNumber()
+        private static readonly Random _random = new();
+
+        public static async Task<string> GenerateUniqueAccountNumberAsync(BankingDbContext context)
         {
-            var random = new Random();
-            return $"ACC{DateTime.UtcNow:yyyyMMdd}{random.Next(100000, 999999)}";
+            string accountNumber;
+
+            do
+            {
+                accountNumber = Generate10DigitNumber();
+            }
+            while (await context.Accounts.AnyAsync(a => a.AccountNumber == accountNumber));
+
+            return accountNumber;
+        }
+
+        private static string Generate10DigitNumber()
+        {
+            // First digit should not be 0 (to ensure 10 digits)
+            var firstDigit = _random.Next(1, 10);
+            var remaining = _random.Next(0, 1_000_000_000); // 9 digits
+
+            return firstDigit.ToString() + remaining.ToString("D9");
         }
     }
 }

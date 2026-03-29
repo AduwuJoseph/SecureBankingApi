@@ -1,4 +1,5 @@
-﻿using BankingAPI.Domain.Entities;
+﻿using BankingAPI.Application.DTOs.Transfer;
+using BankingAPI.Domain.Entities;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -9,11 +10,13 @@ namespace BankingAPI.Application.Interfaces
 {
     public interface ITransactionValidator
     {
-        Task ValidateTransferAsync(Account senderAccount, string recipientAccountNumber, decimal amount);
-        Task ValidateWithdrawalAsync(Account account, decimal amount);
-        Task ValidateDepositAsync(Account account, decimal amount);
-        Task<bool> CheckDailyLimitAsync(Guid accountId, decimal amount);
-        Task<bool> CheckMonthlyLimitAsync(Guid accountId, decimal amount);
-        Task<bool> PerformAntiFraudCheckAsync(Account sender, Account recipient, decimal amount);
+        /// <summary>
+        /// Validates a transfer transaction
+        /// </summary>
+        Task<ValidationResult> ValidateTransferAsync(
+            Account senderAccount,
+            string recipientAccountNumber,
+            decimal amount,
+            CancellationToken cancellationToken = default);
     }
 }

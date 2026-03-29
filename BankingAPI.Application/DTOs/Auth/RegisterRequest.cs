@@ -19,10 +19,16 @@ namespace BankingAPI.Application.DTOs.Auth
         public string Email { get; set; }
 
         [Required]
-        [MinLength(8)]
+        [MinLength(6, ErrorMessage = "Password must be at least 6 characters long")]
         public string Password { get; set; }
 
-        [Phone]
+
+        [Required]
+        [Compare(nameof(Password), ErrorMessage = "Passwords do not match")]
+        public string ConfirmPassword { get; set; }
+
+        [RegularExpression(@"^\+?[1-9]\d{1,14}$", ErrorMessage = "Invalid phone number")]
+        [StringLength(15, ErrorMessage = "Phone number cannot exceed 15 characters"), MinLength (11, ErrorMessage = "Phone number must be at least 11 characters")]
         public string PhoneNumber { get; set; }
     }
 }

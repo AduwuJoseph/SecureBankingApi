@@ -11,18 +11,36 @@ namespace BankingAPI.Application.Interfaces
 {
     public interface ITransactionService
     {
-        Task<Transaction> GetByReferenceAsync(string reference);
-        Task<Transaction> GetByIdempotentKeyAsync(string idempotentKey);
-        Task<IEnumerable<Transaction>> GetAccountTransactionsAsync(Guid accountId, int page, int pageSize);
-        Task<IEnumerable<Transaction>> GetUserTransactionsAsync(Guid userId, int page, int pageSize);
-        Task<IEnumerable<Transaction>> GetPendingTransactionsAsync();
-        Task<IEnumerable<Transaction>> GetFailedTransactionsAsync(DateTime since);
-        Task<decimal> GetDailyTransferTotalAsync(Guid accountId, DateTime date);
-        Task<Dictionary<DateTime, decimal>> GetWeeklyTransactionSummaryAsync(Guid accountId, DateTime endDate);
-        Task<PagedResponse<IEnumerable<TransactionResponse>>> GetTransactions(TransactionRequest transactionRequest);
+        /// <summary>
+        /// Get transaction by ID with caching
+        /// </summary>
+        Task<TransactionViewModel?> GetTransactionByIdAsync(int userId, int transactionId);
 
-        Task<ApiResponse<TransactionResponse>> GetByReferenceAsync(string reference);
-        Task<PagedResponse<IEnumerable<TransactionResponse>>> GetAccountTransactionsAsync(Guid accountId, int page, int pageSize);
-        Task<PagedResponse<IEnumerable<TransactionResponse>>> GetUserTransactionsAsync(Guid userId, int page, int pageSize);
+        /// <summary>
+        /// Get transaction history with pagination, filtering, and caching
+        /// </summary>
+        Task<TransactionHistoryResponse> GetTransactionHistoryAsync(
+            int userId,
+            TransactionHistoryRequest request);
+
+        /// <summary>
+        /// Get transaction summary with caching
+        /// </summary>
+        Task<AdminTransactionSummaryResponse> GetTransactionSummaryAsync(int userId, DateTime? startDate = null, DateTime? endDate = null);
+
+        /// <summary>
+        /// Get recent transactions with caching
+        /// </summary>
+        Task<IEnumerable<TransactionViewModel>> GetRecentTransactionsAsync(int userId, int count = 10);
+
+        /// <summary>
+        /// Invalidate transaction cache for a user
+        /// </summary>
+        Task InvalidateTransactionCacheAsync(int userId);
+
+        /// <summary>
+        /// Export transactions to CSV
+        /// </summary>
+        Task<byte[]> ExportTransactionsToCsvAsync(int userId, TransactionHistoryRequest request);
     }
 }

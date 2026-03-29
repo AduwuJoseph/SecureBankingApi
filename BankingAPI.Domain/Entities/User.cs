@@ -1,6 +1,8 @@
 ﻿using BankingAPI.Domain.Common;
 using System;
 using System.Collections.Generic;
+using System.ComponentModel.DataAnnotations;
+using System.ComponentModel.DataAnnotations.Schema;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
@@ -10,7 +12,9 @@ namespace BankingAPI.Domain.Entities
 {
     public class User: BaseEntity
     {
-        public Guid Id { get; set; }
+        [Key]
+        [DatabaseGenerated(DatabaseGeneratedOption.Identity)]
+        public int Id { get; set; }
         public string FullName { get; set; }
         public string Email { get; set; }
         public string PasswordHash { get; set; }
@@ -20,8 +24,9 @@ namespace BankingAPI.Domain.Entities
         public DateTime? LastLoginAt { get; set; }
 
         // Navigation properties
-        public virtual Account Account { get; set; }
-        public virtual ICollection<System.Transactions.Transaction> SentTransactions { get; set; }
-        public virtual ICollection<System.Transactions.Transaction> ReceivedTransactions { get; set; }
+        public virtual Account? Account { get; set; }
+        public virtual ICollection<Transaction> SentTransactions { get; set; } = new List<Transaction>();
+        public virtual ICollection<Transaction> ReceivedTransactions { get; set; } = new List<Transaction>();
+        public virtual ICollection<RefreshToken> RefreshTokens { get; set; } = new List<RefreshToken>();
     }
 }

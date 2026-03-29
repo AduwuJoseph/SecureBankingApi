@@ -11,7 +11,17 @@ namespace BankingAPI.Application.Interfaces
 {
     public interface ITransferService
     {
-        Task<ApiResponse<TransactionResponse>> TransferAsync(Guid userId, TransferRequest transferRequest);
-        Task<ApiResponse<TransactionResponse>> GetTransactionStatusAsync(string transactionReference);
+        /// <summary>
+        /// Transfer funds from one user to another
+        /// </summary>
+        Task<TransferResponse> TransferFundsAsync(int senderId, TransferRequest transferRequest, string idempotencyKey,
+        CancellationToken cancellationToken = default);
+
+        /// <summary>
+        /// Get daily transfer total for a user
+        /// </summary>
+        Task<decimal> GetDailyTransferTotalAsync(
+            int userId,
+            CancellationToken cancellationToken = default);
     }
 }

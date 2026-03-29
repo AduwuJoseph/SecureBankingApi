@@ -9,7 +9,7 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "BankingAPI.Infrastructure",
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "BankingAPI.Application", "BankingAPI.Application\BankingAPI.Application.csproj", "{FA04EF16-EEFB-4DFC-80CE-00543D6477F8}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "BankingAPI.Tests", "BankingAPI.Tests\BankingAPI.Tests.csproj", "{42A856C2-CBFB-40A1-87AE-5348B0CD930D}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "BankingAPI.UnitTests", "BankingAPI.Tests\BankingAPI.UnitTests.csproj", "{42A856C2-CBFB-40A1-87AE-5348B0CD930D}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "BankingAPI.Api", "BankingAPI.Api\BankingAPI.Api.csproj", "{98DBFBAC-5468-43BA-A55E-1F07EB9C9256}"
 EndProject

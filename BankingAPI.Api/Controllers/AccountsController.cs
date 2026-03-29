@@ -1,94 +1,111 @@
-﻿using BankingAPI.Application.Interfaces;
+﻿using BankingAPI.Application.DTOs.Account;
+using BankingAPI.Application.DTOs.Transaction;
+using BankingAPI.Application.Interfaces;
+using BankingAPI.Application.Services;
+using BankingAPI.Infrastructure.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
-using System.Security.Claims;
-using System.Threading.Tasks;
 
-namespace BankingAPI.API.Controllers
+namespace BankingAPI.API.Controllers;
+
+[ApiController]
+[Route("api/[controller]")]
+[Authorize]
+public class AccountController : ControllerBase
 {
-    [Authorize]
-    [ApiController]
-    [Route("api/[controller]")]
-    public class AccountController : ControllerBase
+    private readonly IAccountService _accountService;
+    private readonly CurrentUserService _currentUserService;
+
+    public AccountController(IAccountService accountService, CurrentUserService currentUserService)
     {
-        private readonly IAccountService _accountService;
-        private readonly ILogger<AccountController> _logger;
+        _accountService = accountService;
+        _currentUserService = currentUserService;
+    }
 
-        public AccountController(IAccountService accountService, ILogger<AccountController> logger)
+    /// <summary>
+    /// Get current user's account information
+    /// </summary>
+    [HttpGet("me")]
+    [ProducesResponseType(typeof(AccountInfoResponse), StatusCodes.Status200OK)]
+    public async Task<IActionResult> GetAccountInfo()
+    {
+        var userId = _currentUserService.UserId ?? throw new UnauthorizedAccessException();
+        var result = await _accountService.GetAccountInfoAsync(userId);
+        return Ok(result);
+    }
+
+    /// <summary>
+    /// Update account contact information
+    /// </summary>
+    [HttpPut("update-contact")]
+    [ProducesResponseType(typeof(AccountInfoResponse), StatusCodes.Status200OK)]
+    public async Task<IActionResult> UpdateContactInfo([FromBody] AccountUpdateRequest updateDto)
+    {
+        var userId = _currentUserService.UserId ?? throw new UnauthorizedAccessException();
+        var result = await _accountService.UpdateContactInfoAsync(userId, updateDto);
+        return Ok(result);
+    }
+
+    /// <summary>
+    /// Get transaction history with pagination and filtering
+    /// </summary>
+    [HttpGet("transactions")]
+    [ProducesResponseType(typeof(TransactionHistoryResponse), StatusCodes.Status200OK)]
+    public async Task<IActionResult> GetTransactionHistory([FromQuery] TransactionHistoryRequest request)
+    {
+        var userId = _currentUserService.UserId ?? throw new UnauthorizedAccessException();
+        var result = await _accountService.GetTransactionHistoryAsync(userId, request);
+        return Ok(result);
+    }
+
+    /// <summary>
+    /// Get transaction by ID
+    /// </summary>
+    [HttpGet("transactions/{transactionId}")]
+    [ProducesResponseType(typeof(TransactionViewModel), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> GetTransactionById(int transactionId)
+    {
+        var userId = _currentUserService.UserId ?? throw new UnauthorizedAccessException();
+        var result = await _accountService.GetTransactionByIdAsync(userId, transactionId);
+
+        if (result == null)
         {
-            _accountService = accountService;
-            _logger = logger;
+            return NotFound(new { message = "Transaction not found" });
         }
 
-        [HttpGet]
-        public async Task<IActionResult> GetAccountDetails()
-        {
-            var userId = Guid.Parse(User.FindFirst(ClaimTypes.NameIdentifier)?.Value);
+        return Ok(result);
+    }
 
-            try
-            {
-                var account = await _accountService.GetAccountDetailsAsync(userId);
-                return Ok(account);
-            }
-            catch (NotFoundException ex)
-            {
-                return NotFound(new { error = ex.Message });
-            }
+    /// <summary>
+    /// Export transaction history as CSV
+    /// </summary>
+    [HttpGet("transactions/export")]
+    [ProducesResponseType(typeof(FileResult), StatusCodes.Status200OK)]
+    public async Task<IActionResult> ExportTransactions([FromQuery] TransactionHistoryRequest request)
+    {
+        var userId = _currentUserService.UserId ?? throw new UnauthorizedAccessException();
+        request.PageSize = 10000; // Max limit for export
+        var result = await _accountService.GetTransactionHistoryAsync(userId, request);
+
+        var csv = GenerateTransactionCsv(result.Transactions);
+        var bytes = System.Text.Encoding.UTF8.GetBytes(csv);
+
+        return File(bytes, "text/csv", $"transactions_{DateTime.Now:yyyyMMdd}.csv");
+    }
+
+    private string GenerateTransactionCsv(List<TransactionViewModel> transactions)
+    {
+        var csv = new System.Text.StringBuilder();
+        csv.AppendLine("Transaction ID,Reference,Type,Status,Amount,Description,Counterparty,Date,Time");
+
+        foreach (var transaction in transactions)
+        {
+            csv.AppendLine($"{transaction.TransactionId},{transaction.Reference},{transaction.Type}," +
+                          $"{transaction.Status},{transaction.Amount},{transaction.Description}," +
+                          $"{transaction.Counterparty.Name},{transaction.FormattedDate},{transaction.FormattedTime}");
         }
 
-        [HttpGet("balance")]
-        public async Task<IActionResult> GetBalance()
-        {
-            var userId = Guid.Parse(User.FindFirst(ClaimTypes.NameIdentifier)?.Value);
-
-            try
-            {
-                var balance = await _accountService.GetAccountBalanceAsync(userId);
-                return Ok(new { balance });
-            }
-            catch (NotFoundException ex)
-            {
-                return NotFound(new { error = ex.Message });
-            }
-        }
-
-        [HttpGet("transactions")]
-        public async Task<IActionResult> GetTransactionHistory(
-            [FromQuery] int page = 1,
-            [FromQuery] int pageSize = 20)
-        {
-            var userId = Guid.Parse(User.FindFirst(ClaimTypes.NameIdentifier)?.Value);
-
-            if (page < 1) page = 1;
-            if (pageSize < 1 || pageSize > 100) pageSize = 20;
-
-            try
-            {
-                var transactions = await _accountService.GetTransactionHistoryAsync(
-                    userId, page, pageSize);
-                return Ok(transactions);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Failed to get transaction history for user {UserId}", userId);
-                return StatusCode(500, new { error = "Failed to retrieve transaction history" });
-            }
-        }
-
-        [HttpPut]
-        public async Task<IActionResult> UpdateAccountInfo([FromBody] UpdateAccountDto updateDto)
-        {
-            var userId = Guid.Parse(User.FindFirst(ClaimTypes.NameIdentifier)?.Value);
-
-            try
-            {
-                var result = await _accountService.UpdateAccountInfoAsync(userId, updateDto.PhoneNumber);
-                return Ok(new { success = result });
-            }
-            catch (NotFoundException ex)
-            {
-                return NotFound(new { error = ex.Message });
-            }
-        }
+        return csv.ToString();
     }
 }

@@ -1,16 +1,32 @@
-﻿using System;
+﻿using BankingAPI.Application.DTOs.Account;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
+using System.Text.Json.Serialization;
 using System.Threading.Tasks;
 
 namespace BankingAPI.Application.DTOs.Auth
 {
     public class AuthResponse
     {
-        public string Token { get; set; }
-        public string RefreshToken { get; set; }
-        public DateTime ExpiresAt { get; set; }
-        public UserDto User { get; set; }
+        [JsonPropertyName("message")]
+        public string? Message { get; set; }
+        [JsonPropertyName("accessToken")]
+        public string? AccessToken { get; set; }
+
+        [JsonPropertyName("refreshToken")]
+        public string? RefreshToken { get; set; }
+
+        [JsonPropertyName("expiresIn")]
+        public int ExpiresIn { get; set; } = 3600; // 1 hour in seconds
+
+        [JsonPropertyName("tokenType")]
+        public string TokenType { get; set; } = "Bearer";
+
+        [JsonPropertyName("refreshTokenExpiry")]
+        public DateTime? RefreshTokenExpiry { get; set; }
+        [JsonPropertyName("user")]
+        public UserResponse User { get; set; }
     }
 }

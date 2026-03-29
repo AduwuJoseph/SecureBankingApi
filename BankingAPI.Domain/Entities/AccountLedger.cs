@@ -9,9 +9,9 @@ namespace BankingAPI.Domain.Entities
 {
     public class AccountLedger
     {
-        public Guid Id { get; set; }
-        public Guid AccountId { get; set; }
-        public Guid TransactionId { get; set; }
+        public long Id { get; set; }
+        public int UserId { get; set; }
+        public string TransactionReference { get; set; }
         public decimal PreviousBalance { get; set; }
         public decimal NewBalance { get; set; }
         public decimal Amount { get; set; }
@@ -20,7 +20,7 @@ namespace BankingAPI.Domain.Entities
         public DateTime CreatedAt { get; set; }
 
         // Navigation properties
-        public virtual Account Account { get; set; }
-        public virtual Transaction Transaction { get; set; }
+        public virtual User User { get; set; }
+        public virtual Transaction? Transaction { get; set; }
     }
 }

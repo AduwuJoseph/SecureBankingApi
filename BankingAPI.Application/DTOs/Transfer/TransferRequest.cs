@@ -1,4 +1,5 @@
-﻿using System;
+﻿using BankingAPI.Domain.Enum;
+using System;
 using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
 using System.Linq;
@@ -9,7 +10,7 @@ namespace BankingAPI.Application.DTOs.Transfer
 {
     public class TransferRequest
     {
-
+        [RegularExpression(@"^\+?\d{10}$", ErrorMessage = "Invalid account number format")]
         [Required]
         public string RecipientAccountNumber { get; set; }
 
@@ -22,5 +23,8 @@ namespace BankingAPI.Application.DTOs.Transfer
 
         [Required]
         public string IdempotentKey { get; set; }
+
+        [Required]
+        public TransactionType TransactionType { get; set; }
     }
 }

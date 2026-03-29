@@ -1,5 +1,6 @@
 ﻿using BankingAPI.Application.DTOs;
 using BankingAPI.Application.DTOs.Transaction;
+using BankingAPI.Application.DTOs.Transfer;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -10,7 +11,7 @@ namespace BankingAPI.Application.Interfaces
 {
     public interface IIdempotencyService
     {
-        Task<(bool isDuplicate, TransactionResponse response)> IsDuplicateRequestAsync(string idempotencyKey);
-        Task PushResponse(TransactionResponse response, string idempotencyKey);
+        Task<TransferResponse?> GetCachedResponseAsync(string idempotencyKey);
+        Task CacheResponseAsync(string idempotencyKey, TransferResponse response);
     }
 }

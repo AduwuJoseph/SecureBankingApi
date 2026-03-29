@@ -15,7 +15,7 @@ namespace BankingAPI.Application.DTOs.Auth
         public string Email { get; set; }
 
         [Required]
-        [MinLength(8)]
+        [MinLength(6, ErrorMessage = "Password must be at least 6 characters long")]
         public string Password { get; set; }
     }
 }
