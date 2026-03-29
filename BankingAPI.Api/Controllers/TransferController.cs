@@ -9,6 +9,7 @@ using BankingAPI.Domain.Exceptions;
 using BankingAPI.Infrastructure.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.Extensions.Logging;
 
 namespace BankingAPI.API.Controllers;
@@ -43,6 +44,7 @@ public class TransferController : ControllerBase
     /// <param name="cancellationToken">Cancellation token</param>
     /// <returns>Transfer response with transaction details</returns>
     [HttpPost]
+    [EnableRateLimiting("TransferPolicy")]
     [ProducesResponseType(typeof(TransferResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ValidationErrorResponse), StatusCodes.Status400BadRequest)]
     [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status401Unauthorized)]
