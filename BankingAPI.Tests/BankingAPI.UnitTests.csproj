@@ -40,4 +40,8 @@
     <ProjectReference Include="..\BankingAPI.Infrastructure\BankingAPI.Infrastructure.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <Folder Include="Integration\" />
+  </ItemGroup>
+
 </Project>
