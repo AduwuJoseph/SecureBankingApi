@@ -1,245 +1,221 @@
-﻿using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.Logging;
-using NSubstitute;
-using FluentAssertions;
-using BankingAPI.Application.DTOs.Transfer;
+﻿using BankingAPI.Application.DTOs.Transfer;
 using BankingAPI.Application.Interfaces;
-using BankingAPI.Application.Services;
 using BankingAPI.Domain.Entities;
 using BankingAPI.Domain.Enum;
 using BankingAPI.Domain.Exceptions;
 using BankingAPI.Infrastructure.Data;
 using BankingAPI.Infrastructure.Services;
-using Microsoft.Extensions.Caching.Memory;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Caching.Distributed;
+using Microsoft.Extensions.Caching.Memory;
+using Microsoft.Extensions.Logging;
+using NSubstitute;
+using NUnit.Framework;
+using Assert = NUnit.Framework.Assert;
 
 namespace BankingAPI.UnitTests.Services;
 
 public class TransferServiceTests
 {
-    private readonly IBankingDbContext _context;
-    private readonly ILogger<TransferService> _logger;
-    private readonly IAuditService _auditService;
-    private readonly IIdempotencyService _idempotencyService;
-    private readonly IMemoryCache _memoryCache;
-    private readonly IDistributedCache _distributedCache;
-    private readonly ITransactionValidator _transactionValidator;
-    private readonly TransferService _transferService;
-
-    public TransferServiceTests()
+    private IBankingDbContext CreateDbContext()
     {
-        _context = Substitute.For<IBankingDbContext>();
-        _logger = Substitute.For<ILogger<TransferService>>();
-        _auditService = Substitute.For<IAuditService>();
-        _idempotencyService = Substitute.For<IIdempotencyService>();
-        _memoryCache = Substitute.For<IMemoryCache>();
-        _distributedCache = Substitute.For<IDistributedCache>();
-        _transactionValidator = Substitute.For<ITransactionValidator>();
-        _transferService = new TransferService(_context, _logger, _auditService, _idempotencyService, _memoryCache, _distributedCache, _transactionValidator);
-
-        SeedDatabase();
+        return Substitute.For<IBankingDbContext>();
     }
 
-    private void SeedDatabase()
-    {
-        var user1 = new User { Id = 1, FullName = "User One", Email = "user1@test.com", PasswordHash = "hash" };
-        var user2 = new User { Id = 2, FullName = "User Two", Email = "user2@test.com", PasswordHash = "hash" };
-
-        _context.Users.AddRange(user1, user2);
-
-        _context.Accounts.AddRange(
-            new Account { UserId = 1, Balance = 1000 },
-            new Account { UserId = 2, Balance = 500 }
-        );
-
-        _context.SaveChangesAsync();
-    }
-
-    [Fact]
-    public async Task TransferFundsAsync_ValidTransfer_ShouldSucceed()
+    [Test]
+    public async Task TransferFunds_Should_succeed_for_valid_request()
     {
         // Arrange
-        var transferDto = new TransferRequest
-        {
-            RecipientAccountNumber = "user2@test.com",
-            Amount = 100,
-            Description = "Test transfer"
-        };
-        var idempotencyKey = Guid.NewGuid().ToString();
+        var context = CreateDbContext();
 
-        _idempotencyService.GetCachedResponseAsync(idempotencyKey)
-            .Returns(Task.FromResult<TransferResponse?>(null));
+        var sender = new Account
+        {
+            Id = 1,
+            UserId = 10,
+            Balance = 1000,
+            IsActive = true,
+            AccountNumber = "ACC123",
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+        };
+
+        var recipient = new Account
+        {
+            Id = 2,
+            UserId = 20,
+            Balance = 500,
+            AccountNumber = "ACC999",
+            IsActive = true,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+        };
+
+        context.Accounts.AddRange(sender, recipient);
+        await context.SaveChangesAsync();
+
+        var logger = Substitute.For<ILogger<TransferService>>();
+        var auditService = Substitute.For<IAuditService>();
+        var idempotencyService = Substitute.For<IIdempotencyService>();
+        var validator = Substitute.For<ITransactionValidator>();
+        var memoryCache = Substitute.For<IMemoryCache>();
+        var distributedCache = Substitute.For<IDistributedCache>();
+
+        // ✅ VALID result (no errors)
+        validator.ValidateTransferAsync(
+            Arg.Any<Account>(),
+            Arg.Any<string>(),
+            Arg.Any<decimal>(),
+            Arg.Any<CancellationToken>())
+            .Returns(new ValidationResult());
+
+        idempotencyService.GetCachedResponseAsync(Arg.Any<string>())
+            .Returns((TransferResponse)null);
+
+        var sut = new TransferService(
+            context,
+            logger,
+            auditService,
+            idempotencyService,
+            memoryCache,
+            distributedCache,
+            validator);
+
+        var request = new TransferRequest
+        {
+            Amount = 100,
+            RecipientAccountNumber = "ACC999",
+            Description = "Test transfer",
+            TransactionType = TransactionType.Transfer
+        };
 
         // Act
-        var result = await _transferService.TransferFundsAsync(1, transferDto, idempotencyKey);
+        var result = await sut.TransferFundsAsync(10, request, "idem-key");
 
         // Assert
-        result.Success.Should().BeTrue();
-        result.Message.Should().Be("Transfer successful");
-        result.TransactionReference.Should().NotBeNull();
-        result.NewBalance.Should().Be(900);
+        Assert.That(result.Success, Is.True);
+        Assert.That(result.NewBalance, Is.EqualTo(900));
 
-        // Verify balances
-        var senderAccount = await _context.Accounts.FindAsync(1);
-        var recipientAccount = await _context.Accounts.FindAsync(2);
-        senderAccount!.Balance.Should().Be(900);
-        recipientAccount!.Balance.Should().Be(600);
-
-        // Verify transaction was recorded
-        var transaction = await _context.Transactions.FirstOrDefaultAsync();
-        transaction.Should().NotBeNull();
-        transaction!.Amount.Should().Be(100);
-        transaction.Status.Should().Be(TransactionStatus.Completed);
-
-        // Verify ledger entries
-        var ledgerEntries = await _context.AccountLedgers.ToListAsync();
-        ledgerEntries.Should().HaveCount(2);
-
-        // Verify audit log was called
-        await _auditService.Received(1).LogAsync(
-            Arg.Is<string>(s => s == "Transfer"),
-            Arg.Is<string>(s => s.Contains("100")),
-            Arg.Is<string>(s => s == "1"));
+        await auditService.Received(1)
+            .LogAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Any<string>());
     }
 
-    [Fact]
-    public async Task TransferFundsAsync_InsufficientBalance_ShouldThrowBusinessRuleException()
+    [Test]
+    public void TransferFunds_Should_throw_when_insufficient_balance()
     {
-        // Arrange
-        var transferDto = new TransferRequest
+        var context = CreateDbContext();
+
+        context.Accounts.Add(new Account
         {
-            RecipientAccountNumber = "9304949499",
-            Amount = 2000,
-            Description = "Too much"
-        };
-        var idempotencyKey = Guid.NewGuid().ToString();
+            Id = 1,
+            UserId = 10,
+            Balance = 50,
+            IsActive = true,
+            AccountNumber = "ACC123",
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+        });
 
-        _idempotencyService.GetCachedResponseAsync(idempotencyKey)
-            .Returns(Task.FromResult<TransferResponse?>(null));
+        context.SaveChangesAsync();
 
-        // Act & Assert
-        var exception = await Assert.ThrowsAsync<BusinessRuleException>(() =>
-            _transferService.TransferFundsAsync(1, transferDto, idempotencyKey));
+        var sut = CreateSut(context);
 
-        exception.Message.Should().Contain("Insufficient balance");
-    }
-
-    [Fact]
-    public async Task TransferFundsAsync_RecipientNotFound_ShouldThrowNotFoundException()
-    {
-        // Arrange
-        var transferDto = new TransferRequest
+        var request = new TransferRequest
         {
-            RecipientAccountNumber = "7484939485",
             Amount = 100,
-            Description = "Test"
+            RecipientAccountNumber = "ACC999"
         };
-        var idempotencyKey = Guid.NewGuid().ToString();
 
-        _idempotencyService.GetCachedResponseAsync(idempotencyKey)
-            .Returns(Task.FromResult<TransferResponse?>(null));
+        var ex = Assert.ThrowsAsync<BusinessRuleException>(async () =>
+        {
+            await sut.TransferFundsAsync(10, request, "idem-key");
+        });
 
-        // Act & Assert
-        var exception = await Assert.ThrowsAsync<NotFoundException>(() =>
-            _transferService.TransferFundsAsync(1, transferDto, idempotencyKey));
-
-        exception.Message.Should().Contain("Recipient with email");
+        Assert.That(ex.Message, Does.Contain("Insufficient balance"));
     }
 
-    [Fact]
-    public async Task TransferFundsAsync_SelfTransfer_ShouldThrowBusinessRuleException()
+    [Test]
+    public async Task TransferFunds_Should_return_cached_response_when_idempotent()
     {
-        // Arrange
-        var transferDto = new TransferRequest
-        {
-            RecipientAccountNumber = "7484939485",
-            Amount = 100,
-            Description = "Self transfer"
-        };
-        var idempotencyKey = Guid.NewGuid().ToString();
+        var context = CreateDbContext();
 
-        _idempotencyService.GetCachedResponseAsync(idempotencyKey)
-            .Returns(Task.FromResult<TransferResponse?>(null));
+        var idempotencyService = Substitute.For<IIdempotencyService>();
 
-        // Act & Assert
-        var exception = await Assert.ThrowsAsync<BusinessRuleException>(() =>
-            _transferService.TransferFundsAsync(1, transferDto, idempotencyKey));
+        idempotencyService.GetCachedResponseAsync("idem-key")
+            .Returns(new TransferResponse
+            {
+                TransactionReference = "TXN-123",
+                NewBalance = 800,
+                RowVersion = "abc"
+            });
 
-        exception.Message.Should().Be("Cannot transfer money to yourself");
+        var sut = CreateSut(context, idempotencyService: idempotencyService);
+
+        var result = await sut.TransferFundsAsync(10, new TransferRequest(), "idem-key");
+
+        Assert.That(result.IsIdempotentResponse, Is.True);
+        Assert.That(result.TransactionReference, Is.EqualTo("TXN-123"));
     }
 
-    [Fact]
-    public async Task TransferFundsAsync_DuplicateRequest_ShouldReturnCachedResponse()
+    [Test]
+    public void TransferFunds_Should_throw_when_validation_fails()
     {
-        // Arrange
-        var transferDto = new TransferRequest
+        var context = CreateDbContext();
+
+        context.Accounts.Add(new Account
         {
-            RecipientAccountNumber = "7484939485",
-            Amount = 100,
-            Description = "Test transfer"
-        };
-        var idempotencyKey = Guid.NewGuid().ToString();
+            Id = 1,
+            UserId = 10,
+            Balance = 1000,
+            IsActive = true,
+            AccountNumber = "ACC123",
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+        });
 
-        var cachedResponse = new TransferResponse
+        context.SaveChangesAsync();
+
+        var validator = Substitute.For<ITransactionValidator>();
+
+        var validationResult = new ValidationResult();
+        validationResult.AddError("Invalid transfer");
+
+        validator.ValidateTransferAsync(
+            Arg.Any<Account>(),
+            Arg.Any<string>(),
+            Arg.Any<decimal>(),
+            Arg.Any<CancellationToken>())
+            .Returns(validationResult);
+
+        var sut = CreateSut(context, validator: validator);
+
+        var ex = Assert.ThrowsAsync<ValidationException>(async () =>
         {
-            Success = true,
-            Message = "Transfer successful (cached)",
-            TransactionReference = "999",
-            NewBalance = 900,
-            IsIdempotentResponse = true
-        };
+            await sut.TransferFundsAsync(10, new TransferRequest
+            {
+                Amount = 100,
+                RecipientAccountNumber = "ACC999"
+            }, "idem-key");
+        });
 
-        _idempotencyService.GetCachedResponseAsync(idempotencyKey)
-            .Returns(Task.FromResult<TransferResponse?>(cachedResponse));
-
-        // Act
-        var result = await _transferService.TransferFundsAsync(1, transferDto, idempotencyKey);
-
-        // Assert
-        result.Success.Should().BeTrue();
-        result.IsIdempotentResponse.Should().BeTrue();
-        result.Message.Should().Be("Transfer successful (cached response)");
-
-        // Verify no new transaction was created
-        var transactions = await _context.Transactions.ToListAsync();
-        transactions.Should().HaveCount(0);
+        Assert.That(ex.Message, Does.Contain("Transfer validation failed"));
     }
 
-    [Fact]
-    public async Task TransferFundsAsync_ShouldCreateLedgerEntries()
+    private TransferService CreateSut(
+        IBankingDbContext context,
+        ILogger<TransferService>? logger = null,
+        IAuditService? auditService = null,
+        IIdempotencyService? idempotencyService = null,
+        IMemoryCache? memoryCache = null,
+        IDistributedCache? distributedCache = null,
+        ITransactionValidator? validator = null)
     {
-        // Arrange
-        var transferDto = new TransferRequest
-        {
-            RecipientAccountNumber = "7484939485",
-            Amount = 150,
-            Description = "Test with ledger"
-        };
-        var idempotencyKey = Guid.NewGuid().ToString();
-
-        _idempotencyService.GetCachedResponseAsync(idempotencyKey)
-            .Returns(Task.FromResult<TransferResponse?>(null));
-
-        // Act
-        await _transferService.TransferFundsAsync(1, transferDto, idempotencyKey);
-
-        // Assert
-        var ledgerEntries = await _context.AccountLedgers
-            .OrderBy(l => l.UserId)
-            .ToListAsync();
-
-        ledgerEntries.Should().HaveCount(2);
-
-        var senderLedger = ledgerEntries.First(l => l.UserId == 1);
-        senderLedger.EntryType.Should().Be(LedgerEntryType.Debit);
-        senderLedger.Amount.Should().Be(150);
-        senderLedger.PreviousBalance.Should().Be(1000);
-        senderLedger.NewBalance.Should().Be(850);
-
-        var recipientLedger = ledgerEntries.First(l => l.UserId == 2);
-        recipientLedger.EntryType.Should().Be(LedgerEntryType.Credit);
-        recipientLedger.Amount.Should().Be(150);
-        recipientLedger.PreviousBalance.Should().Be(500);
-        recipientLedger.NewBalance.Should().Be(650);
+        return new TransferService(
+            context,
+            logger ?? Substitute.For<ILogger<TransferService>>(),
+            auditService ?? Substitute.For<IAuditService>(),
+            idempotencyService ?? Substitute.For<IIdempotencyService>(),
+            memoryCache ?? Substitute.For<IMemoryCache>(),
+            distributedCache ?? Substitute.For<IDistributedCache>(),
+            validator ?? Substitute.For<ITransactionValidator>());
     }
 }

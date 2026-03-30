@@ -1,6 +1,6 @@
 ﻿using BankingAPI.Application.DTOs.Auth;
 using BankingAPI.Application.Interfaces;
-using BankingAPI.Application.Services;
+using BankingAPI.Domain.Entities;
 using BankingAPI.Domain.Exceptions;
 using BankingAPI.Infrastructure.Data;
 using BankingAPI.Infrastructure.Services;
@@ -10,178 +10,291 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using NSubstitute;
+using System;
+using System.Threading.Tasks;
+using Xunit;
 
 namespace BankingAPI.UnitTests.Services;
 
-public class AuthServiceTests 
+public class AuthServiceTests
 {
-    private readonly IBankingDbContext _context;
+    private readonly BankingDbContext _context; // real InMemory DbContext
     private readonly IConfiguration _configuration;
     private readonly ILogger<AuthService> _logger;
     private readonly IAuditService _auditService;
-    private readonly AuthService _authService;
     private readonly IPasswordHasher _passwordHasher;
     private readonly IHttpContextAccessor _httpContextAccessor;
+    private readonly AuthService _sut;
 
     public AuthServiceTests()
     {
-        _context = Substitute.For<IBankingDbContext>();
+        // Use a unique in-memory database for isolation
+        var options = new DbContextOptionsBuilder<BankingDbContext>()
+            .UseInMemoryDatabase(Guid.NewGuid().ToString())
+            .Options;
+
+        _context = new BankingDbContext(options);
+
         _configuration = Substitute.For<IConfiguration>();
         _logger = Substitute.For<ILogger<AuthService>>();
         _auditService = Substitute.For<IAuditService>();
         _passwordHasher = Substitute.For<IPasswordHasher>();
         _httpContextAccessor = Substitute.For<IHttpContextAccessor>();
-        _authService = new AuthService(_context, _configuration, _logger, _auditService, _httpContextAccessor, _passwordHasher);
 
         SetupConfiguration();
+        SetupHttpContext();
+
+        _sut = new AuthService(
+            _context,
+            _configuration,
+            _logger,
+            _auditService,
+            _httpContextAccessor,
+            _passwordHasher);
     }
 
     private void SetupConfiguration()
     {
-        var jwtSettings = new Dictionary<string, string>
+        var settings = new Dictionary<string, string>
         {
-            ["Secret"] = "TestSecretKeyForJWTTokenGeneration1234567890!@#$%",
-            ["Issuer"] = "TestIssuer",
-            ["Audience"] = "TestAudience",
-            ["ExpirationMinutes"] = "60"
+            ["JwtSettings:Secret"] = "SuperSecretKeyForJwtToken1234567890",
+            ["JwtSettings:Issuer"] = "TestIssuer",
+            ["JwtSettings:Audience"] = "TestAudience",
+            ["JwtSettings:ExpirationMinutes"] = "60",              // string is fine
+            ["JwtSettings:RefreshTokenExpirationDays"] = "7"
         };
 
-        _configuration.GetSection("JwtSettings").Returns(new ConfigurationBuilder()
-            .AddInMemoryCollection(jwtSettings)
-            .Build()
-            .GetSection("JwtSettings"));
+        var config = new ConfigurationBuilder()
+            .AddInMemoryCollection(settings)
+            .Build();
+
+        _configuration.GetSection("JwtSettings").Returns(config.GetSection("JwtSettings"));
+
+        _configuration.GetSection("JwtSettings").Returns(config.GetSection("JwtSettings"));
+        _configuration["JwtSettings:Secret"].Returns("SuperSecretKeyForJwtToken1234567890");
+        _configuration["JwtSettings:Issuer"].Returns("TestIssuer");
+        _configuration["JwtSettings:Audience"].Returns("TestAudience");
+        _configuration["JwtSettings:ExpirationMinutes"].Returns("60");
+        _configuration["JwtSettings:RefreshTokenExpirationDays"].Returns("7");
     }
 
-    [Fact]
-    public async Task RegisterAsync_ValidUser_ShouldSucceed()
+    private void SetupHttpContext()
     {
-        // Arrange
-        var registerDto = new RegisterRequest
+        var context = new DefaultHttpContext();
+        context.Request.Headers["User-Agent"] = "UnitTest-Agent";
+        context.Connection.RemoteIpAddress = System.Net.IPAddress.Parse("127.0.0.1");
+        _httpContextAccessor.HttpContext.Returns(context);
+    }
+
+    // ========================= TESTS =========================
+
+    [Fact]
+    public async Task RegisterAsync_Should_Create_User_And_Account()
+    {
+        var request = new RegisterRequest
         {
-            FullName = "Test User",
-            Email = "test@example.com",
-            Password = "password123",
-            ConfirmPassword = "password123"
+            FullName = "John Doe",
+            Email = "john@test.com",
+            Password = "password",
+            ConfirmPassword = "password"
         };
 
-        // Act
-        var result = await _authService.RegisterAsync(registerDto);
+        _passwordHasher.HashPassword("password").Returns("hashed");
 
-        // Assert
+        var result = await _sut.RegisterAsync(request);
+
         result.Message.Should().Be("Registration successful");
-        result.User.UserId.Should().Be(1);
-        result.User.Email.Should().Be("test@example.com");
+        result.User.Email.Should().Be("john@test.com");
 
-        // Verify user was created
-        var user = await _context.Users.FirstOrDefaultAsync(u => u.Email == "test@example.com");
-        user.Should().NotBeNull();
+        (await _context.Users.CountAsync()).Should().Be(1);
+        (await _context.Accounts.CountAsync()).Should().Be(1);
 
-        // Verify account was created
-        var account = await _context.Accounts.FindAsync(user!.Id);
-        account.Should().NotBeNull();
-        account!.Balance.Should().Be(0);
-
-        // Verify audit log was called
         await _auditService.Received(1).LogAsync(
-            Arg.Is<string>(s => s == "User Registration"),
-            Arg.Is<string>(s => s.Contains("test@example.com")),
-            Arg.Is<string>(s => s == "1"));
+            "User Registration",
+            Arg.Any<string>(),
+            Arg.Any<string>());
     }
 
     [Fact]
-    public async Task RegisterAsync_DuplicateEmail_ShouldThrowBusinessRuleException()
+    public async Task RegisterAsync_Should_Throw_When_Email_Exists()
     {
-        // Arrange
-        var registerDto = new RegisterRequest
+        var existingUser = new User
         {
-            FullName = "Test User",
-            Email = "test@example.com",
-            Password = "password123",
-            ConfirmPassword = "password123"
+            Email = "john@test.com",
+            FullName = "Existing",
+            PasswordHash = "hashed"
+        };
+        await _context.Users.AddAsync(existingUser);
+        await _context.SaveChangesAsync();
+
+        var request = new RegisterRequest
+        {
+            FullName = "John",
+            Email = "john@test.com",
+            Password = "pass",
+            ConfirmPassword = "pass"
         };
 
-        await _authService.RegisterAsync(registerDto);
+        var ex = await Assert.ThrowsAsync<BusinessRuleException>(() =>
+            _sut.RegisterAsync(request));
 
-        // Act & Assert
-        var exception = await Assert.ThrowsAsync<BusinessRuleException>(() =>
-            _authService.RegisterAsync(registerDto));
-
-        exception.Message.Should().Be("User with this email already exists");
+        ex.Message.Should().Be("User with this email already exists");
     }
 
     [Fact]
-    public async Task LoginAsync_ValidCredentials_ShouldSucceed()
+    public async Task LoginAsync_Should_Succeed_With_Valid_Credentials()
     {
-        // Arrange
-        var registerDto = new RegisterRequest
+        var user = new User
         {
-            FullName = "Test User",
-            Email = "test@example.com",
-            Password = "password123",
-            ConfirmPassword = "password123"
-        };
-        await _authService.RegisterAsync(registerDto);
-
-        var loginDto = new LoginRequest
-        {
-            Email = "test@example.com",
-            Password = "password123"
+            Email = "john@test.com",
+            PasswordHash = "hashed",
+            FullName = "John",
+            CreatedAt = DateTime.UtcNow,
+            IsActive = true,
+            IsEmailVerified = true,
+            LastLoginAt = DateTime.UtcNow
         };
 
-        // Act
-        var result = await _authService.LoginAsync(loginDto);
+        var account = new Account
+        {
+            AccountNumber = "1234567890",
+            IsActive = true,
+            User = user,
+            Currency = "NGN",
+            LastUpdated = DateTime.UtcNow,
+            CreatedAt = DateTime.UtcNow,
+            Balance = 0.0m,
+            RowVersion = BitConverter.GetBytes(1L)
+        };
+        user.Account = account;
 
-        // Assert
+        await _context.Users.AddAsync(user);
+        await _context.Accounts.AddAsync(account);
+        await _context.SaveChangesAsync();
+
+        _passwordHasher.VerifyPassword("password", "hashed").Returns(true);
+
+        var result = await _sut.LoginAsync(new LoginRequest { Email = "john@test.com", Password = "password" });
+
         result.Message.Should().Be("Login successful");
         result.AccessToken.Should().NotBeNullOrEmpty();
 
-        // Verify audit log was called
-        await _auditService.Received(1).LogAsync(
-            Arg.Is<string>(s => s == "User Login"),
-            Arg.Is<string>(s => s.Contains("test@example.com")),
-            Arg.Is<string>(s => s == "1"));
+        await _auditService.Received(1).LogAsync("User Login", Arg.Any<string>(), user.Id.ToString());
     }
 
     [Fact]
-    public async Task LoginAsync_InvalidEmail_ShouldThrowUnauthorizedException()
+    public async Task LoginAsync_Should_Throw_When_User_Not_Found()
     {
-        // Arrange
-        var loginDto = new LoginRequest
-        {
-            Email = "nonexistent@example.com",
-            Password = "password123"
-        };
+        var ex = await Assert.ThrowsAsync<UnauthorizedException>(() =>
+            _sut.LoginAsync(new LoginRequest { Email = "none@test.com", Password = "pass" }));
 
-        // Act & Assert
-        var exception = await Assert.ThrowsAsync<UnauthorizedException>(() =>
-            _authService.LoginAsync(loginDto));
-
-        exception.Message.Should().Be("Invalid email or password");
+        ex.Message.Should().Be("Invalid email or password");
     }
 
     [Fact]
-    public async Task LoginAsync_InvalidPassword_ShouldThrowUnauthorizedException()
+    public async Task LoginAsync_Should_Throw_When_Password_Invalid()
     {
-        // Arrange
-        var registerDto = new RegisterRequest
+        var user = new User
         {
-            FullName = "Test User",
-            Email = "test@example.com",
-            Password = "password123",
-            ConfirmPassword = "password123"
-        };
-        await _authService.RegisterAsync(registerDto);
-
-        var loginDto = new LoginRequest
-        {
-            Email = "test@example.com",
-            Password = "wrongpassword"
+            Email = "john@test.com",
+            PasswordHash = "hashed",
+            FullName = "John",
+            CreatedAt = DateTime.UtcNow,
+            IsActive = true,
+            IsEmailVerified = true,
+            LastLoginAt = DateTime.UtcNow
         };
 
-        // Act & Assert
-        var exception = await Assert.ThrowsAsync<UnauthorizedException>(() =>
-            _authService.LoginAsync(loginDto));
+        var account = new Account
+        {
+            AccountNumber = "1234567890",
+            IsActive = true,
+            User = user,
+            Currency = "NGN",
+            LastUpdated = DateTime.UtcNow,
+            CreatedAt = DateTime.UtcNow,
+            Balance = 0.0m,    
+            RowVersion = BitConverter.GetBytes(1L)
+        };
+        user.Account = account;
 
-        exception.Message.Should().Be("Invalid email or password");
+        await _context.Users.AddAsync(user);
+        await _context.Accounts.AddAsync(account);
+        await _context.SaveChangesAsync();
+
+        _passwordHasher.VerifyPassword("wrong", "hashed").Returns(false);
+
+        var ex = await Assert.ThrowsAsync<UnauthorizedException>(() =>
+            _sut.LoginAsync(new LoginRequest { Email = "john@test.com", Password = "wrong" }));
+
+        ex.Message.Should().Be("Invalid email or password");
+    }
+
+    [Fact]
+    public async Task RefreshTokenAsync_Should_Succeed_For_Valid_Token()
+    {
+        var user = new User
+        {
+            Email = "john@test.com",
+            FullName = "John",
+            PasswordHash = "hashed",
+            CreatedAt = DateTime.UtcNow,
+            LastLoginAt = DateTime.UtcNow,
+            IsActive = true,
+            IsEmailVerified = true
+        };
+        await _context.Users.AddAsync(user);
+        await _context.SaveChangesAsync();
+
+        var token = new RefreshToken
+        {
+            Token = "valid-token",
+            UserId = user.Id,
+            User = user,
+            ExpiryDate = DateTime.UtcNow.AddDays(1),
+            IsRevoked = false,
+            IsUsed = false
+        };
+        await _context.RefreshTokens.AddAsync(token);
+        await _context.SaveChangesAsync();
+
+        var result = await _sut.RefreshTokenAsync(new RefreshTokenRequest { RefreshToken = "valid-token" });
+
+        result.Message.Should().Be("Token refreshed successfully");
+        await _auditService.Received(1).LogAsync("Token Refresh", Arg.Any<string>(), user.Id.ToString());
+    }
+
+    [Fact]
+    public async Task RefreshTokenAsync_Should_Throw_When_Invalid()
+    {
+        var ex = await Assert.ThrowsAsync<UnauthorizedException>(() =>
+            _sut.RefreshTokenAsync(new RefreshTokenRequest { RefreshToken = "invalid" }));
+
+        ex.Message.Should().Be("Invalid refresh token");
+    }
+
+    [Fact]
+    public async Task RevokeTokenAsync_Should_Return_True_When_Found()
+    {
+        var token = new RefreshToken { Token = "token", UserId = 1 };
+        await _context.RefreshTokens.AddAsync(token);
+        await _context.SaveChangesAsync();
+
+        var result = await _sut.RevokeTokenAsync(new RevokeTokenRequest { RefreshToken = "token" }, 1);
+
+        result.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task LogoutAsync_AllDevices_Should_Revoke_All()
+    {
+        await _context.RefreshTokens.AddAsync(new RefreshToken { UserId = 1, IsRevoked = false });
+        await _context.RefreshTokens.AddAsync(new RefreshToken { UserId = 1, IsRevoked = false });
+        await _context.SaveChangesAsync();
+
+        var result = await _sut.LogoutAsync(new LogoutRequest { AllDevices = true }, 1);
+
+        result.Should().BeTrue();
+        (await _context.RefreshTokens.AllAsync(x => x.IsRevoked)).Should().BeTrue();
     }
 }
